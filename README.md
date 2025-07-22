@@ -25,7 +25,7 @@ It includes:
 
 ### 1.1 Create a Shell Script
 
-Save this script as `/config/get_enphase_token.sh`:
+Save this script as `/config/get_enphase_token.sh` Make sure to input YOUR_EMAIL and YOUR_PASSWORD:
 
 ```bash
 #!/usr/bin/env bash
