@@ -1,8 +1,4 @@
-Absolutely! Below is the complete GitHub-ready project, including README.md, configuration.yaml (for your rest_command), and the script YAML (copy-paste into the Home Assistant UI Scripts Editor).
 
-⸻
-
-📄 README.md
 
 # 🔋 Enphase Battery Scheduler for Home Assistant
 
@@ -31,6 +27,7 @@ Users can configure the schedule using a Home Assistant script with selectable d
 
 Paste the following under your `rest_command:` section:
 
+```yaml
 rest_command:
   enphase_add_cfg_schedule:
     url: "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/{{ battery_id }}/schedules"
@@ -50,6 +47,7 @@ rest_command:
         "scheduleType": "{{ schedule_type }}",
         "days": [ {% for d in days %}{{ d | int }}{% if not loop.last %}, {% endif %}{% endfor %} ]
       }
+```
 
 Then restart Home Assistant or reload the YAML config.
 
@@ -60,6 +58,7 @@ Then restart Home Assistant or reload the YAML config.
 Go to Settings → Automations & Scenes → Scripts → + Add Script
 Then paste the following:
 
+```script
 alias: Add Enphase Battery Schedule
 sequence:
   - service: rest_command.enphase_add_cfg_schedule
@@ -115,22 +114,12 @@ fields:
     default: 1234567
 mode: single
 icon: mdi:battery-clock
+```
 
-
-⸻
-
-✅ Example
-	•	Start Time: 02:00
-	•	End Time: 03:00
-	•	Schedule Type: CFG
-	•	Days: Monday to Friday
-	•	User ID: 1234567
-	•	Battery ID: 1234567
 
 ⸻
 
 🛠 Requirements
 	•	sensor.enphase_jwt with token attribute containing your valid JWT token
-	•	Enphase Enlighten system with API access
 	•	Battery ID and User ID
 
