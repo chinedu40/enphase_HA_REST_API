@@ -1,0 +1,103 @@
+# Configure a default setup of Home Assistant (frontend, api, etc)
+default_config:
+
+# Text to speech
+tts:
+  - platform: google_translate
+
+group: !include groups.yaml
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+logger:
+  default: error
+  logs:
+    homeassistant.components.rest: debug
+    homeassistant.components.rest_command: debug
+
+ 
+
+command_line:
+  - sensor:
+      name: "Enphase JWT"
+      command: "bash /config/get_enphase_token.sh"
+      scan_interval: 259200 # how often (in seconds) to auto-refresh, e.g. 12 hours
+      value_template: "{{ value_json.status }}" # A short status or placeholder
+      json_attributes:
+        - token
+
+rest_command:
+  toggle_charge_from_grid:
+    url: "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/batterySettings/{{ battery_id }}?userId={{ user_id }}&source=enho"
+    method: PUT
+    headers:
+      content-type: "application/json"
+      e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      username: "{{ user_id }}"
+    payload: >
+      {
+        "chargeFromGrid": {{ charge_value }},
+        "acceptedItcDisclaimer": true
+      }
+
+  toggle_discharge_to_grid:
+    url: "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/batterySettings/{{ battery_id }}?userId={{ user_id }}&source=enho"
+    method: PUT
+    headers:
+      content-type: "application/json"
+      e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      username: "{{ user_id }}"
+    payload: >
+      {
+        "dtgControl": {
+          "enabled": {{ enable | lower }},
+          "scheduleSupported": true
+          {% if start_time is defined and end_time is defined %}
+          "startTime": {{ start_time }},
+          "endTime": {{ end_time }}
+          {% endif %}
+        }
+      }
+
+  enphase_add_schedule:
+    url: "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/{{ battery_id }}/schedules"
+    method: post
+    headers:
+      content-type: "application/json"
+      e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      username: "{{ user_id }}"
+      origin: "https://battery-profile-ui.enphaseenergy.com"
+      referer: "https://battery-profile-ui.enphaseenergy.com/"
+    payload: >
+      {
+        "timezone": "Europe/London",
+        "startTime": "{{ start_time[:5] }}",
+        "endTime": "{{ end_time[:5] }}",
+        "limit": {{ limit }},
+        "scheduleType": "{{ schedule_type }}",
+        "days": [ {% for d in days %}{{ d | int }}{% if not loop.last %}, {% endif %}{% endfor %} ]
+      }
+
+  enphase_validate_schedule_discharge:
+    url: "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/{{ battery_id }}/schedules/isValid"
+    method: post
+    headers:
+      content-type: "application/json"
+      e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      username: "{{ user_id }}"
+      origin: "https://battery-profile-ui.enphaseenergy.com"
+      referer: "https://battery-profile-ui.enphaseenergy.com/"
+    payload: '{"scheduleType":"dtg"}'
+
+  enphase_validate_schedule_charge:
+    url: "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/{{ battery_id }}/schedules/isValid"
+    method: post
+    headers:
+      content-type: "application/json"
+      e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      username: "{{ user_id }}"
+      origin: "https://battery-profile-ui.enphaseenergy.com"
+      referer: "https://battery-profile-ui.enphaseenergy.com/"
+    payload: '{"scheduleType":"cfg","forceScheduleOpted":true}'
+
