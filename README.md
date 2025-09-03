@@ -29,18 +29,59 @@ Save this script as `/config/get_enphase_token.sh`:
 
 ```bash
 #!/usr/bin/env bash
+set -euo pipefail
 
-# 1) Get the login page to capture authenticity_token
-TOKEN=$(curl -c /tmp/cookies.txt -L 'https://enlighten.enphaseenergy.com/login'  | sed -n 's/.*name="authenticity_token" value="\([^"]*\)".*/\1/p')
+EMAIL="YOUR_EMAIL"
+PASSWORD="YOUR_PASSWORD"
+BATTERY_ID=""   # <-- set yours
+USER_ID=""      # <-- set yours
 
-# 2) Log in with the token, email, and password
-curl -b /tmp/cookies.txt -c /tmp/cookies.txt -X POST 'https://enlighten.enphaseenergy.com/login/login'  -H 'Content-Type: application/x-www-form-urlencoded'  --data "utf8=%E2%9C%93&authenticity_token=${TOKEN}&user[email]=YOUR_EMAIL&user[password]=YOUR_PASSWORD"  >/dev/null 2>&1
+COOKIES="/config/cookies.txt"
+HDRS="/config/headers.txt"
 
-# 3) Fetch the JWT token
-jwt_response=$(curl -b /tmp/cookies.txt 'https://enlighten.enphaseenergy.com/app-api/jwt_token.json' 2>/dev/null)
-full_token=$(echo "$jwt_response" | jq -r '.token')
+: > "$COOKIES"
+: > "$HDRS"
 
-echo "{\"status\":\"OK\",\"token\":\"${full_token}\"}"
+# 1) Get authenticity_token (and seed cookies)
+auth_token=$(curl -sSL -c "$COOKIES" 'https://enlighten.enphaseenergy.com/login' \
+  | sed -n 's/.*name="authenticity_token" value="\([^"]*\)".*/\1/p')
+
+# 2) Login (keeps same cookie jar)
+curl -sS -b "$COOKIES" -c "$COOKIES" \
+  -X POST 'https://enlighten.enphaseenergy.com/login/login' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data "utf8=%E2%9C%93&authenticity_token=${auth_token}&user[email]=${EMAIL}&user[password]=${PASSWORD}" \
+  >/dev/null
+
+# 3) Get JWT (continues same cookies)
+jwt_json=$(curl -sS -b "$COOKIES" -c "$COOKIES" \
+  'https://enlighten.enphaseenergy.com/app-api/jwt_token.json')
+jwt_token=$(echo "$jwt_json" | jq -r '.token // empty')
+
+# 4) Prime BP-XSRF-Token by posting to schedules/isValid (403 is OK; we want Set-Cookie)
+#    IMPORTANT: include Origin/Referer + e-auth-token + username
+curl -sS -D "$HDRS" -b "$COOKIES" -c "$COOKIES" \
+  'https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/'"$BATTERY_ID"'/schedules/isValid' \
+  -H 'content-type: application/json' \
+  -H 'origin: https://battery-profile-ui.enphaseenergy.com' \
+  -H 'referer: https://battery-profile-ui.enphaseenergy.com/' \
+  -H "e-auth-token: ${jwt_token}" \
+  -H "username: ${USER_ID}" \
+  --data-raw '{"scheduleType":"dtg"}' >/dev/null || true
+
+# 5) Extract BP-XSRF-Token from cookies; if missing, fall back to response headers
+xsrf_token=$(awk '$6 == "BP-XSRF-Token" { print $7 }' "$COOKIES" | tail -n1 || true)
+if [ -z "${xsrf_token:-}" ]; then
+  xsrf_token=$(grep -i 'Set-Cookie: *BP-XSRF-Token=' "$HDRS" \
+    | sed -E 's/.*BP-XSRF-Token=([^;]+).*/\1/' | tail -n1 || true)
+fi
+
+status="OK"
+if [ -z "${jwt_token:-}" ] || [ -z "${xsrf_token:-}" ]; then
+  status="PARTIAL"
+fi
+
+echo "{\"status\":\"${status}\",\"token\":\"${jwt_token}\",\"xsrf\":\"${xsrf_token}\"}"
 ```
 
 Make it executable:
@@ -62,6 +103,7 @@ sensor:
     value_template: "{{ value_json.status }}"
     json_attributes:
       - token
+      - xsrf
 ```
 
 ---
@@ -108,9 +150,11 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: '{"scheduleType":"dtg"}'
 
   enphase_validate_cfg:
@@ -119,9 +163,11 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: '{"scheduleType":"cfg","forceScheduleOpted":true}'
 ```
 
@@ -138,9 +184,11 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: >
       {
         "chargeFromGrid": {{ charge }},
@@ -157,9 +205,11 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: >
       {
         "dtgControl": {
@@ -247,9 +297,11 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: >
       {
         "timezone": "Europe/London",
