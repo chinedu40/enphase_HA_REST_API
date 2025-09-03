@@ -99,7 +99,7 @@ sensor:
   - platform: command_line
     name: "Enphase JWT"
     command: "bash /config/get_enphase_token.sh"
-    scan_interval: 43200  # every 12 hours
+    scan_interval: 900  # every 15 minutes
     value_template: "{{ value_json.status }}"
     json_attributes:
       - token
