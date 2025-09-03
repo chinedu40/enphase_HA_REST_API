@@ -114,7 +114,7 @@ After restarting Home Assistant:
 
 - Go to **Developer Tools → States**
 - Look for `sensor.enphase_jwt`
-- Use `{{ state_attr('sensor.enphase_jwt', 'token') }}` to reference the token in service calls
+- Use `{{ state_attr('sensor.enphase_jwt', 'token') }}` and `{{ state_attr('sensor.enphase_jwt', 'xsrf') }}` to reference the token in service calls
 
 ---
 
