@@ -5,7 +5,7 @@ This guide provides a fully automated setup to control **Charge from Grid** and 
 
 It includes:
 
-- 🪪 Automated JWT token retrieval every 12 hours  
+- 🪪 Automated JWT and XSRF token retrieval every 15 minutes
 - 🔍 Instructions to capture your battery and user IDs  
 - 🔄 Home Assistant configuration for charge/discharge toggles  
 - 🧪 Required validation before toggling  
@@ -383,7 +383,7 @@ icon: mdi:battery-clock
 
 - Avoid hard-coding tokens — use `sensor.enphase_jwt` dynamically
 - Always validate before PUT requests
-- Tokens expire — ensure your script runs at least every 12 hours
+- Tokens expire — ensure your script runs at least every 15 minutes
 - Use Developer Tools → Services in HA to test your scripts
 
 ---
