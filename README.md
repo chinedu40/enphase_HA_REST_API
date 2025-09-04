@@ -21,9 +21,29 @@ It includes:
 
 ---
 
-## 🪪 Step 1 – Automate Enphase JWT Token Retrieval
+## 🔍 Step 1 – Get `battery_id` and `user_id` from the Enphase Web App
 
-### 1.1 Create a Shell Script
+### 1.1 Steps to Capture IDs
+
+1. Log in to [https://enlighten.enphaseenergy.com](https://enlighten.enphaseenergy.com)
+2. Open Chrome DevTools → Network tab
+3. Navigate to **Battery Settings**, then toggle a setting (e.g., Charge from Grid)
+4. In DevTools, find a request URL like:
+
+```
+https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/batterySettings/<BATTERY_ID>?userId=<USER_ID>
+```
+
+5. Extract from URL:
+
+- `<BATTERY_ID>` → e.g., `1234567`
+- `<USER_ID>` → e.g., `9876543`
+
+---
+
+## 🪪 Step 2 – Automate Enphase JWT Token Retrieval
+
+### 2.1 Create a Shell Script
 
 Save this script as `/config/get_enphase_token.sh`:
 
@@ -92,7 +112,7 @@ chmod +x /config/get_enphase_token.sh
 
 ---
 
-### 1.2 Add the Token Sensor to `configuration.yaml`
+### 2.2 Add the Token Sensor to `configuration.yaml`
 
 ```yaml
 sensor:
@@ -108,7 +128,7 @@ sensor:
 
 ---
 
-### 1.3 Access the JWT in Home Assistant
+### 2.3 Access the JWT in Home Assistant
 
 After restarting Home Assistant:
 
@@ -118,25 +138,6 @@ After restarting Home Assistant:
 
 ---
 
-## 🔍 Step 2 – Get `battery_id` and `user_id` from the Enphase Web App
-
-### 2.1 Steps to Capture IDs
-
-1. Log in to [https://enlighten.enphaseenergy.com](https://enlighten.enphaseenergy.com)
-2. Open Chrome DevTools → Network tab
-3. Navigate to **Battery Settings**, then toggle a setting (e.g., Charge from Grid)
-4. In DevTools, find a request URL like:
-
-```
-https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/batterySettings/<BATTERY_ID>?userId=<USER_ID>
-```
-
-5. Extract from URL:
-
-- `<BATTERY_ID>` → e.g., `1234567`
-- `<USER_ID>` → e.g., `9876543`
-
----
 
 ## 🧪 Step 3 – Validation Rest Commands (Required!)
 
