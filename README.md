@@ -219,6 +219,28 @@ rest_command:
       }
 ```
 
+### 4.3 Restrict Battery Discharge
+
+```yaml
+  enphase_battery_restrict_discharge:
+    url: "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/batterySettings/{{ battery_id }}?userId={{ user_id }}&source=enho"
+    method: put
+    headers:
+      content-type: "application/json"
+      e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      username: "{{ user_id }}"
+      origin: "https://battery-profile-ui.enphaseenergy.com"
+      referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+    payload: >
+      {
+        "rbdControl": {
+          "enabled": {{ restrict }}
+        }
+      }
+```
+
 ---
 
 ## ▶️ Step 5 – Scripts to Toggle Charging and Discharging
@@ -262,6 +284,17 @@ toggle_enphase_discharge_to_grid:
         discharge: "{{ discharge }}"
   mode: single
 ```
+### 5.3 Restrict Battery Discharge - On
+
+```yaml
+action: rest_command.enphase_battery_restrict_discharge
+data:
+  battery_id: "5652514"
+  user_id: "4980363"
+  restrict: "true"
+response_variable: enphase
+```
+Change restrict to false to turn it off. 
 
 ---
 
