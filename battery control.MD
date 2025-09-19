@@ -57,7 +57,7 @@ mqtt:
         {% set bt = 100 %}
         {% set gt = 150 %}
         {% set batt = (value_json['meters']['storage']['agg_p_mw'] | float(0)) / 1000 %}
-        {% set grid = (value_json['meters']['grid']['agg_p_mw'] | float(0)) / 1000 %} ```
+        {% set grid = (value_json['meters']['grid']['agg_p_mw'] | float(0)) / 1000 %} 
 
 ## 2. Create Template Switches
 
@@ -82,7 +82,7 @@ switch:
           service: script.enphase_battery_discharge_to_grid_on
         turn_off:
           service: script.enphase_battery_discharge_to_grid_off
-        {{ 'ON' if (batt > bt and grid < -gt) else 'OFF' }} ```
+        {{ 'ON' if (batt > bt and grid < -gt) else 'OFF' }} 
 
 ## 3. Create Template Switches via the UI
 
