@@ -77,9 +77,9 @@ switch:
         friendly_name: "Discharge Battery to Grid"
         value_template: "{{ is_state('binary_sensor.battery_discharging_to_grid', 'on') }}"
         turn_on:
-          service: script.enphase_battery_discharge_to_grid_on
+          service: script.enphase_battery_discharge_to_grid_on --> enter your script name here
         turn_off:
-          service: script.enphase_battery_discharge_to_grid_off
+          service: script.enphase_battery_discharge_to_grid_off --> enter your script name here
 ```
 
 Restart Home Assistant after saving.
@@ -97,8 +97,8 @@ If you prefer to use the **Home Assistant UI** instead of YAML:
      ```jinja
      {{ is_state('binary_sensor.battery_charging_from_grid', 'on') }}
      ```
-   - **Turn on action:** call `script.enphase_battery_charge_from_grid_on`
-   - **Turn off action:** call `script.enphase_battery_charge_from_grid_off`
+   - **Turn on action:** call `script.enphase_battery_charge_from_grid_on` --> enter your script name here
+   - **Turn off action:** call `script.enphase_battery_charge_from_grid_off` --> enter your script name here
 
 ## 4. Repeat for Discharge Battery to Grid
 
@@ -111,5 +111,5 @@ If you prefer to use the **Home Assistant UI** instead of YAML:
      ```jinja
      {{ is_state('binary_sensor.battery_discharging_to_grid', 'on') }}
      ```
-   - **Turn on action:** call `script.enphase_battery_discharge_to_grid_on`
-   - **Turn off action:** call `script.enphase_battery_discharge_to_grid_off`
+   - **Turn on action:** call `script.enphase_battery_discharge_to_grid_on` --> enter your script name here
+   - **Turn off action:** call `script.enphase_battery_discharge_to_grid_off` --> enter your script name here
