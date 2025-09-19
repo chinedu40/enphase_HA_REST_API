@@ -6,8 +6,6 @@ This setup lets you:
 - Control these modes with **template switches** that run your Enphase control scripts.
 - Keep switch state in sync with actual battery behaviour.
 
----
-
 ## 0. Prerequisites
 
 You need MQTT in your Home Assistant environment. There are two parts:
@@ -21,8 +19,6 @@ You need MQTT in your Home Assistant environment. There are two parts:
    - This publishes data from your Envoy to MQTT under the topic `/envoy/json`.
 
 With both running, you’ll see JSON messages on `/envoy/json` that include battery, grid, and PV power.
-
----
 
 ## 1. Create Binary Sensors
 
@@ -57,7 +53,9 @@ mqtt:
         {% set bt = 100 %}
         {% set gt = 150 %}
         {% set batt = (value_json['meters']['storage']['agg_p_mw'] | float(0)) / 1000 %}
-        {% set grid = (value_json['meters']['grid']['agg_p_mw'] | float(0)) / 1000 %} 
+        {% set grid = (value_json['meters']['grid']['agg_p_mw'] | float(0)) / 1000 %}
+        {{ 'ON' if (batt > bt and grid < -gt) else 'OFF' }}
+```
 
 ## 2. Create Template Switches
 
@@ -82,7 +80,9 @@ switch:
           service: script.enphase_battery_discharge_to_grid_on
         turn_off:
           service: script.enphase_battery_discharge_to_grid_off
-        {{ 'ON' if (batt > bt and grid < -gt) else 'OFF' }} 
+```
+
+Restart Home Assistant after saving.
 
 ## 3. Create Template Switches via the UI
 
@@ -92,20 +92,24 @@ If you prefer to use the **Home Assistant UI** instead of YAML:
 2. Select **Template → Switch**.
 3. Fill in the details for **Charge Battery from Grid**:
 
-   - **Name:** `Charge Battery from Grid`  
+   - **Name:** `Charge Battery from Grid`
    - **Value template:**
      ```jinja
      {{ is_state('binary_sensor.battery_charging_from_grid', 'on') }}
      ```
-   - **Turn on action:** call `script.enphase_battery_charge_from_grid_on`  
+   - **Turn on action:** call `script.enphase_battery_charge_from_grid_on`
    - **Turn off action:** call `script.enphase_battery_charge_from_grid_off`
 
-## 4. Repeat for **Discharge Battery to Grid**:
+## 4. Repeat for Discharge Battery to Grid
 
-   - **Name:** `Discharge Battery to Grid`  
+1. Go back to **Settings → Devices & Services → Helpers → + Create Helper**.
+2. Select **Template → Switch** again.
+3. Fill in the details for **Discharge Battery to Grid**:
+
+   - **Name:** `Discharge Battery to Grid`
    - **Value template:**
      ```jinja
      {{ is_state('binary_sensor.battery_discharging_to_grid', 'on') }}
      ```
-   - **Turn on action:** call `script.enphase_battery_discharge_to_grid_on`  
-   - **Turn off action:** call `script.enphase_battery_discharge_to_grid_off```
+   - **Turn on action:** call `script.enphase_battery_discharge_to_grid_on`
+   - **Turn off action:** call `script.enphase_battery_discharge_to_grid_off`
