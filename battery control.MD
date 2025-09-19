@@ -57,5 +57,55 @@ mqtt:
         {% set bt = 100 %}
         {% set gt = 150 %}
         {% set batt = (value_json['meters']['storage']['agg_p_mw'] | float(0)) / 1000 %}
-        {% set grid = (value_json['meters']['grid']['agg_p_mw'] | float(0)) / 1000 %}
-        {{ 'ON' if (batt > bt and grid < -gt) else 'OFF' }}
+        {% set grid = (value_json['meters']['grid']['agg_p_mw'] | float(0)) / 1000 %} ```
+
+## 2. Create Template Switches
+
+Add this to your `configuration.yaml` (or `switches.yaml` if you split configs):
+
+```yaml
+switch:
+  - platform: template
+    switches:
+      charge_battery_from_the_grid:
+        friendly_name: "Charge Battery from Grid"
+        value_template: "{{ is_state('binary_sensor.battery_charging_from_grid', 'on') }}"
+        turn_on:
+          service: script.enphase_battery_charge_from_grid_on
+        turn_off:
+          service: script.enphase_battery_charge_from_grid_off
+
+      discharge_battery_to_the_grid:
+        friendly_name: "Discharge Battery to Grid"
+        value_template: "{{ is_state('binary_sensor.battery_discharging_to_grid', 'on') }}"
+        turn_on:
+          service: script.enphase_battery_discharge_to_grid_on
+        turn_off:
+          service: script.enphase_battery_discharge_to_grid_off
+        {{ 'ON' if (batt > bt and grid < -gt) else 'OFF' }} ```
+
+## 3. Create Template Switches via the UI
+
+If you prefer to use the **Home Assistant UI** instead of YAML:
+
+1. Go to **Settings → Devices & Services → Helpers → + Create Helper**.
+2. Select **Template → Switch**.
+3. Fill in the details for **Charge Battery from Grid**:
+
+   - **Name:** `Charge Battery from Grid`  
+   - **Value template:**
+     ```jinja
+     {{ is_state('binary_sensor.battery_charging_from_grid', 'on') }}
+     ```
+   - **Turn on action:** call `script.enphase_battery_charge_from_grid_on`  
+   - **Turn off action:** call `script.enphase_battery_charge_from_grid_off`
+
+## 4. Repeat for **Discharge Battery to Grid**:
+
+   - **Name:** `Discharge Battery to Grid`  
+   - **Value template:**
+     ```jinja
+     {{ is_state('binary_sensor.battery_discharging_to_grid', 'on') }}
+     ```
+   - **Turn on action:** call `script.enphase_battery_discharge_to_grid_on`  
+   - **Turn off action:** call `script.enphase_battery_discharge_to_grid_off```
