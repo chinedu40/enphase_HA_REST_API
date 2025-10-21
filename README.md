@@ -1,5 +1,5 @@
 
-# ⚡ Enphase IQ Battery Integration for Home Assistant (Updated September 2025)
+# ⚡ Enphase IQ Battery Integration for Home Assistant (Updated October 2025)
 
 This guide provides a fully automated setup to control **Charge from Grid** and **Discharge to Grid** for Enphase IQ Batteries via the Enlighten API.
 
