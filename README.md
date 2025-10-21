@@ -412,7 +412,7 @@ icon: mdi:battery-clock
 
 ```
 
-# 🗑️ Enphase Battery — Delete Schedules from Home Assistant (REST Method)
+# 7 🗑️ Enphase Battery — Delete Schedules from Home Assistant (REST Method)
 
 This guide lets you **list and delete Enphase schedules** (CFG / DTG / RBD) inside **Home Assistant** using a command_line sensor and a **REST command** that mirrors the browser request.
 
