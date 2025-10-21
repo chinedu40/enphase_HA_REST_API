@@ -411,6 +411,220 @@ mode: single
 icon: mdi:battery-clock
 
 ```
+
+# 🗑️ Enphase Battery — Delete Schedules from Home Assistant (REST Method)
+
+This guide lets you **list and delete Enphase schedules** (CFG / DTG / RBD) inside **Home Assistant** using a command_line sensor and a **REST command** that mirrors the browser request.
+
+> Works nicely with Predbat: clear out overlapping schedules and re-apply your desired state.
+
+---
+
+## 1) Create the “get schedules” script
+
+**File:** `/config/get_enphase_schedules_json.sh`
+
+```bash
+#!/usr/bin/env bash
+# Fetch Enphase schedule IDs grouped by type (CFG/DTG/RBD) for Home Assistant.
+# Uses ENPHASE_AUTH (JWT) and ENPHASE_XSRF (xsrf) environment variables.
+
+set -uo pipefail
+
+SITE_ID="YOUR_SITE_ID"
+USERNAME="YOUR_USER_ID"
+LOG_FILE="/config/enphase_debug.log"
+
+{
+  echo
+  echo "========== $(date '+%F %T') =========="
+  echo "Script started"
+  echo "AUTH present: $([ -n "${ENPHASE_AUTH:-}" ] && echo yes || echo no), XSRF: ${ENPHASE_XSRF:-missing}"
+} >> "$LOG_FILE"
+
+if [[ -z "${ENPHASE_AUTH:-}" || -z "${ENPHASE_XSRF:-}" ]]; then
+  echo '{"error":"Missing or empty tokens"}'
+  echo "Missing or empty tokens" >> "$LOG_FILE"
+  exit 0
+fi
+
+BASE_URL="https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/${SITE_ID}"
+
+JSON=$(curl -sS "${BASE_URL}/schedules" \
+  -H "accept: application/json, text/plain, */*" \
+  -H "content-type: application/json" \
+  -H "origin: https://battery-profile-ui.enphaseenergy.com" \
+  -H "referer: https://battery-profile-ui.enphaseenergy.com/" \
+  -H "username: ${USERNAME}" \
+  -H "x-xsrf-token: ${ENPHASE_XSRF}" \
+  -H "e-auth-token: ${ENPHASE_AUTH}" 2>>"$LOG_FILE" || echo "")
+
+echo "Raw response length: ${#JSON}" >> "$LOG_FILE"
+
+if [[ -z "$JSON" ]]; then
+  echo '{"error":"Empty response from API"}'
+  echo "Empty API response" >> "$LOG_FILE"
+  exit 0
+fi
+
+if ! echo "$JSON" | jq empty >/dev/null 2>&1; then
+  SHORT=$(echo "$JSON" | head -c 200 | sed 's/"/\\"/g')
+  echo "{\"error\":\"Invalid or non-JSON response\",\"preview\":\"${SHORT}...\"}"
+  echo "Invalid JSON: ${SHORT}" >> "$LOG_FILE"
+  exit 0
+fi
+
+OUTPUT=$(echo "$JSON" | jq -c '{
+  cfg: (.cfg.details // [] | map(.scheduleId)),
+  dtg: (.dtg.details // [] | map(.scheduleId)),
+  rbd: (.rbd.details // [] | map(.scheduleId)),
+  other: []
+}')
+
+echo "$OUTPUT"
+echo "Output: $OUTPUT" >> "$LOG_FILE"
+exit 0
+```
+
+Make it executable:
+
+```chmod +x /config/get_enphase_schedules_json.sh```
+
+
+⸻
+
+2) Create the command_line sensor
+
+configuration.yaml (or split file):
+```yaml
+command_line:
+  - sensor:
+      name: "Enphase Schedules"
+      command: >
+        /bin/bash -c 'ENPHASE_AUTH="{{ state_attr("sensor.enphase_jwt", "token") }}"
+        ENPHASE_XSRF="{{ state_attr("sensor.enphase_jwt", "xsrf") }}"
+        /config/get_enphase_schedules_json.sh'
+      scan_interval: 30
+      value_template: "OK"
+      json_attributes:
+        - cfg
+        - dtg
+        - rbd
+        - other
+```
+After reloading, check Developer Tools → States → sensor.enphase_schedules.
+You should see arrays of schedule IDs under cfg, dtg, rbd.
+
+⸻
+
+3) Create the REST command (delete by ID)
+
+configuration.yaml:
+```yaml
+rest_command:
+  enphase_delete_schedule:
+    url: >-
+      https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/{{ battery_id }}/schedules/{{ schedule_id }}/delete
+    method: POST
+    headers:
+      Accept: "application/json, text/plain, */*"
+      Content-Type: "application/json"
+      Origin: "https://battery-profile-ui.enphaseenergy.com"
+      Referer: "https://battery-profile-ui.enphaseenergy.com/"
+      Username: "{{ user_id }}"
+      X-XSRF-Token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      Cookie: "locale=en; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }};"
+      E-Auth-Token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"
+      Connection: "close"
+      TE: "trailers"
+    payload: "{}"
+    content_type: "application/json"
+```
+Test it in Developer Tools → Services:
+```
+service: rest_command.enphase_delete_schedule
+data:
+  schedule_id: XXXX-XXXX-XXX-XXX
+```
+Expected response: {"message":"success"}
+If you see 403, wait for sensor.enphase_jwt to refresh or add a short delay before calling.
+
+⸻
+
+4) Create the user-selectable script (cfg / dtg / rbd / all)
+
+scripts.yaml:
+```
+  alias: "Delete Enphase Schedules by Type"
+  mode: single
+  fields:
+    schedule_type:
+      name: "Schedule Type"
+      description: "Select which schedule(s) to delete"
+      required: true
+      selector:
+        select:
+          options:
+            - cfg
+            - dtg
+            - rbd
+            - all
+    battery_id:
+      name: "Battery ID"
+      description: "Your Enphase Site/Battery ID"
+      required: true
+    user_id:
+      name: "User ID"
+      description: "Your Enphase User ID"
+      required: true
+  sequence:
+    - variables:
+        cfg_ids: "{{ state_attr('sensor.enphase_schedules', 'cfg') or [] }}"
+        dtg_ids: "{{ state_attr('sensor.enphase_schedules', 'dtg') or [] }}"
+        rbd_ids: "{{ state_attr('sensor.enphase_schedules', 'rbd') or [] }}"
+    - choose:
+        - conditions: "{{ schedule_type in ['cfg', 'all'] }}"
+          sequence:
+            - repeat:
+                for_each: "{{ cfg_ids }}"
+                sequence:
+                  - service: rest_command.enphase_delete_schedule
+                    data:
+                      battery_id: "{{ battery_id }}"
+                      user_id: "{{ user_id }}"
+                      schedule_id: "{{ repeat.item }}"
+            - delay: "00:00:02"
+        - conditions: "{{ schedule_type in ['dtg', 'all'] }}"
+          sequence:
+            - repeat:
+                for_each: "{{ dtg_ids }}"
+                sequence:
+                  - service: rest_command.enphase_delete_schedule
+                    data:
+                      battery_id: "{{ battery_id }}"
+                      user_id: "{{ user_id }}"
+                      schedule_id: "{{ repeat.item }}"
+            - delay: "00:00:02"
+        - conditions: "{{ schedule_type in ['rbd', 'all'] }}"
+          sequence:
+            - repeat:
+                for_each: "{{ rbd_ids }}"
+                sequence:
+                  - service: rest_command.enphase_delete_schedule
+                    data:
+                      battery_id: "{{ battery_id }}"
+                      user_id: "{{ user_id }}"
+                      schedule_id: "{{ repeat.item }}"
+            - delay: "00:00:02"
+    - service: homeassistant.update_entity
+      target:
+        entity_id: sensor.enphase_schedules
+```
+Usage examples
+	•	Call the script from the Services UI with schedule_type: dtg
+	•	Or add a Dashboard button that invokes the script with a chosen type.
+
 ---
 
 ## 🧠 Tips & Troubleshooting
