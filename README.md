@@ -381,13 +381,13 @@ rest_command:
         "timezone": "Europe/London",
         "startTime": "{{ start_time[:5] }}",
         "endTime": "{{ end_time[:5] }}",
-        "limit": 100,
+        "limit": {{ limit }},
         "scheduleType": "{{ schedule_type }}",
         "days": [ {% for d in days %}{{ d | int }}{% if not loop.last %}, {% endif %}{% endfor %} ]
       }
 ```
 Then restart Home Assistant or reload the YAML config.
-
+NOTE: setting the limit is important depending on if adding a schedule for charging or discharging as it will stop at the limit set. When it reaches the limit it will run from grid/Solar
 ## 2. Add Script in the UI (Scripts Editor)
 
 Go to Settings → Automations & Scenes → Scripts → + Add Script
@@ -404,7 +404,7 @@ sequence:
       days: "{{ days }}"
       user_id: "{{ user_id }}"
       battery_id: "{{ battery_id }}"
-      limit: 100
+      limit: {{ limit }}
 fields:
   start_time:
     description: "Start time (e.g. '02:00')"
@@ -447,6 +447,15 @@ fields:
   battery_id:
     description: "Battery ID (default: 1234567)"
     default: 1234567
+  limit:
+    description: " Charge/Discharge limit"
+    selector:
+      number:
+        min: 6
+        max: 100
+        mode: box
+        step: 1
+    default: 100 #set 100 if charging or 6 if discharging 
 mode: single
 icon: mdi:battery-clock
 
