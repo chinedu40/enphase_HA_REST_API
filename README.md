@@ -629,43 +629,28 @@ scripts.yaml:
       required: true
   sequence:
     - variables:
-        cfg_ids: "{{ state_attr('sensor.enphase_schedules', 'cfg') or [] }}"
-        dtg_ids: "{{ state_attr('sensor.enphase_schedules', 'dtg') or [] }}"
-        rbd_ids: "{{ state_attr('sensor.enphase_schedules', 'rbd') or [] }}"
-    - choose:
-        - conditions: "{{ schedule_type in ['cfg', 'all'] }}"
-          sequence:
-            - repeat:
-                for_each: "{{ cfg_ids }}"
-                sequence:
-                  - service: rest_command.enphase_delete_schedule
-                    data:
-                      battery_id: "{{ battery_id }}"
-                      user_id: "{{ user_id }}"
-                      schedule_id: "{{ repeat.item }}"
-            - delay: "00:00:02"
-        - conditions: "{{ schedule_type in ['dtg', 'all'] }}"
-          sequence:
-            - repeat:
-                for_each: "{{ dtg_ids }}"
-                sequence:
-                  - service: rest_command.enphase_delete_schedule
-                    data:
-                      battery_id: "{{ battery_id }}"
-                      user_id: "{{ user_id }}"
-                      schedule_id: "{{ repeat.item }}"
-            - delay: "00:00:02"
-        - conditions: "{{ schedule_type in ['rbd', 'all'] }}"
-          sequence:
-            - repeat:
-                for_each: "{{ rbd_ids }}"
-                sequence:
-                  - service: rest_command.enphase_delete_schedule
-                    data:
-                      battery_id: "{{ battery_id }}"
-                      user_id: "{{ user_id }}"
-                      schedule_id: "{{ repeat.item }}"
-            - delay: "00:00:02"
+        schedules:
+          cfg: "{{ state_attr('sensor.enphase_schedules', 'cfg') or [] }}"
+          dtg: "{{ state_attr('sensor.enphase_schedules', 'dtg') or [] }}"
+          rbd: "{{ state_attr('sensor.enphase_schedules', 'rbd') or [] }}"
+        types_to_delete: >
+          {% if schedule_type == 'all' %}
+            ['cfg','dtg','rbd']
+          {% else %}
+            [schedule_type]
+          {% endif %}
+    - repeat:
+        for_each: "{{ types_to_delete }}"
+        sequence:
+          - repeat:
+              for_each: "{{ schedules[repeat.item] }}"
+              sequence:
+                - service: rest_command.enphase_delete_schedule
+                  data:
+                    battery_id: "{{ battery_id }}"
+                    user_id: "{{ user_id }}"
+                    schedule_id: "{{ repeat.item }}"
+          - delay: "00:00:02"
     - service: homeassistant.update_entity
       target:
         entity_id: sensor.enphase_schedules
