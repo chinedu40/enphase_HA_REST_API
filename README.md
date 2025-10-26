@@ -233,7 +233,7 @@ rest_command:
     payload: >
       {
         "chargeFromGrid": {{ charge }},
-        "acceptedItcDisclaimer": true
+        "acceptedItcDisclaimer": "{{ now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] ~ 'Z' }}"
       }
 ```
 
