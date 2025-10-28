@@ -10,6 +10,10 @@ It includes:
 - 🔄 Home Assistant configuration for charge/discharge toggles  
 - 🧪 Required validation before toggling  
 
+## NOTES - October 2025 
+
+1. When creating an automation or script in home assistant to turn off cfg, dtg, rbd, making sure you toggle first, then 2 or 3 seconds later, delete the schedule if needed. 
+
 ---
 
 ## 📌 Prerequisites
