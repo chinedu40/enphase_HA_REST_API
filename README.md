@@ -49,7 +49,7 @@ https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/batterySettings
 
 ### 2.1 Create a Shell Script
 
-Save this script as `/config/get_enphase_token.sh`:
+Save this script as `/config/get_enphase_token.sh` and make sure you fill in your details at the top of the script:
 
 ```bash
 #!/usr/bin/env bash
