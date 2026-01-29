@@ -1,0 +1,116 @@
+sequence:
+  - variables:
+      st_in: "{{ (start_time | default('', true) | string).strip() }}"
+      st: >
+        {% if st_in in ['', 'unknown', 'unavailable', 'none'] or '{{' in st_in
+        or '}}' in st_in %}
+          {{ states('sensor.ohme_current_start_slot') }}
+        {% else %}
+          {{ st_in }}
+        {% endif %}
+      et_in: "{{ (end_time | default('', true) | string).strip() }}"
+      et: >
+        {% if et_in in ['', 'unknown', 'unavailable', 'none'] or '{{' in et_in
+        or '}}' in et_in %}
+          {{ states('sensor.ohme_current_end_slot') }}
+        {% else %}
+          {{ et_in }}
+        {% endif %}
+      days_list: |
+        {% if days is iterable and days is not string %}
+          {{ days }}
+        {% else %}
+          {{ ["1","2","3","4","5","6","7"] }}
+        {% endif %}
+  - data:
+      start_time: "{{ st }}"
+      end_time: "{{ et }}"
+      schedule_type: "{{ schedule_type }}"
+      days: "{{ days_list }}"
+      user_id: "{{ user_id | int }}"
+      battery_id: "{{ battery_id | int }}"
+      limit: "{{ limit | int }}"
+    action: rest_command.enphase_add_schedule
+alias: Add Enphase Battery Schedule - Dev V2.5
+description: Create a schedule for battery charging or discharging
+mode: single
+fields:
+  start_time:
+    selector:
+      template: {}
+    default: "{{ states('sensor.ohme_current_start_slot') }}"
+  end_time:
+    selector:
+      template: {}
+    default: "{{ states('sensor.ohme_current_end_slot') }}"
+  schedule_type:
+    name: Schedule Type
+    description: Choose schedule type
+    required: true
+    selector:
+      select:
+        options:
+          - label: Charge from Grid (CFG)
+            value: CFG
+          - label: Discharge to Grid (DTG)
+            value: DTG
+          - label: Restrict Battery Discharge (RBD)
+            value: RBD
+    default: CFG
+  days:
+    name: Days
+    description: Select days to apply schedule (Mon=1 to Sun=7)
+    required: true
+    selector:
+      select:
+        multiple: true
+        mode: list
+        options:
+          - label: Monday
+            value: "1"
+          - label: Tuesday
+            value: "2"
+          - label: Wednesday
+            value: "3"
+          - label: Thursday
+            value: "4"
+          - label: Friday
+            value: "5"
+          - label: Saturday
+            value: "6"
+          - label: Sunday
+            value: "7"
+    default:
+      - "1"
+      - "2"
+      - "3"
+      - "4"
+      - "5"
+      - "6"
+      - "7"
+  user_id:
+    name: User ID
+    description: Enphase User ID
+    default: 4980363
+    required: true
+    selector:
+      number:
+        min: 1000000
+        max: 9999999
+        mode: box
+        step: 1
+  battery_id:
+    name: Battery ID
+    description: Enphase Battery Site ID
+    default: 5652514
+    required: true
+    selector:
+      number:
+        min: 1000000
+        max: 9999999
+        mode: box
+        step: 1
+  limit:
+    selector:
+      template: {}
+    default: "{{ states('input_number.enphase_battery_charge_limit') | float(0) | int }}"
