@@ -27,6 +27,23 @@ command_line:
       json_attributes:
         - token
 
+  - sensor:
+      name: Enphase Schedules
+      command: >
+        /bin/bash -c 'ENPHASE_AUTH="{{ state_attr("sensor.enphase_jwt", "token") }}"
+        ENPHASE_XSRF="{{ state_attr("sensor.enphase_jwt", "xsrf") }}"
+        /config/get_enphase_schedules_json.sh'
+      scan_interval: 30
+      value_template: "Ok"
+      json_attributes:
+        - cfg
+        - dtg
+        - rbd
+        - other
+      availability: >
+        {{ state_attr('sensor.enphase_jwt','token') is not none
+           and state_attr('sensor.enphase_jwt','xsrf') is not none }}
+
 rest_command:
   toggle_charge_from_grid:
     url: "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/batterySettings/{{ battery_id }}?userId={{ user_id }}&source=enho"
