@@ -1,0 +1,173 @@
+alias: Delete Enphase Schedules - Dev v7
+mode: single
+description: Delete schedules + apply charge/discharge changes
+fields:
+  schedule_type:
+    name: Schedule Type
+    required: true
+    selector:
+      select:
+        options:
+          - cfg
+          - dtg
+          - rbd
+          - all
+  exclude_schedule:
+    name: Exclude this schedule
+    required: false
+    selector:
+      state:
+        entity_id: input_select.enphase_schedule_picker
+  only_schedule:
+    name: Delete only this schedule
+    required: false
+    selector:
+      state:
+        entity_id: input_select.enphase_schedule_picker
+sequence:
+  - variables:
+      st: "{{ schedule_type }}"
+      exclude_raw: "{{ exclude_schedule | default('none') }}"
+      only_raw: "{{ only_schedule | default('none') }}"
+      only_id: |
+        {% if only_raw is string and ('|' in only_raw) %}
+          {{ only_raw.split('|')[-1].strip() }}
+        {% else %} none {% endif %}
+      exclude_id: |
+        {% if exclude_raw is string and ('|' in exclude_raw) %}
+          {{ exclude_raw.split('|')[-1].strip() }}
+        {% else %} none {% endif %}
+      cfg_list: "{{ state_attr('sensor.enphase_schedules','cfg') or [] }}"
+      dtg_list: "{{ state_attr('sensor.enphase_schedules','dtg') or [] }}"
+      rbd_list: "{{ state_attr('sensor.enphase_schedules','rbd') or [] }}"
+      cfg_deleted: false
+      dtg_deleted: false
+      rbd_deleted: false
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ only_id not in ['none','',None] }}"
+        sequence:
+          - action: rest_command.enphase_delete_schedule
+            data:
+              schedule_id: "{{ only_id }}"
+          - variables:
+              deleted_type: >
+                {% if 'CFG' in only_raw %} cfg {% elif 'DTG' in only_raw %} dtg
+                {% elif 'RBD' in only_raw %} rbd {% else %} none {% endif %}
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ deleted_type == 'cfg' }}"
+                sequence:
+                  - action: rest_command.enphase_validate_schedule_charge
+                    data:
+                      battery_id: "5652514"
+                  - delay: "00:00:03"
+                  - action: rest_command.set_battery_charge
+                    data:
+                      battery_id: "5652514"
+                      user_id: "4980363"
+                      charge_value: "true"
+                      accepted_disclaimer: "true"
+              - conditions:
+                  - condition: template
+                    value_template: "{{ deleted_type == 'dtg' }}"
+                sequence:
+                  - action: rest_command.enphase_validate_schedule_discharge
+                    data:
+                      battery_id: "5652514"
+                  - delay: "00:00:03"
+                  - action: rest_command.toggle_discharge_to_grid
+                    data:
+                      battery_id: "5652514"
+                      user_id: "4980363"
+                      enable: "true"
+          - action: logbook.log
+            data:
+              name: Enphase
+              message: "Deleted only schedule: {{ only_id }}"
+          - stop: Single delete done.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ st in ['cfg','all'] }}"
+        sequence:
+          - repeat:
+              for_each: "{{ cfg_list }}"
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: "{{ repeat.item.id != exclude_id }}"
+                  then:
+                    - action: rest_command.enphase_delete_schedule
+                      data:
+                        schedule_id: "{{ repeat.item.id }}"
+                    - variables:
+                        cfg_deleted: true
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ st in ['dtg','all'] }}"
+        sequence:
+          - repeat:
+              for_each: "{{ dtg_list }}"
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: "{{ repeat.item.id != exclude_id }}"
+                  then:
+                    - action: rest_command.enphase_delete_schedule
+                      data:
+                        schedule_id: "{{ repeat.item.id }}"
+                    - variables:
+                        dtg_deleted: true
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ st in ['rbd','all'] }}"
+        sequence:
+          - repeat:
+              for_each: "{{ rbd_list }}"
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: "{{ repeat.item.id != exclude_id }}"
+                  then:
+                    - action: rest_command.enphase_delete_schedule
+                      data:
+                        schedule_id: "{{ repeat.item.id }}"
+                    - variables:
+                        rbd_deleted: true
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ cfg_deleted }}"
+        sequence:
+          - action: rest_command.enphase_validate_schedule_charge
+            data:
+              battery_id: "5652514"
+          - delay: "00:00:03"
+          - action: rest_command.set_battery_charge
+            data:
+              battery_id: "5652514"
+              user_id: "4980363"
+              charge_value: "true"
+              accepted_disclaimer: "true"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ dtg_deleted }}"
+        sequence:
+          - action: rest_command.enphase_validate_schedule_discharge
+            data:
+              battery_id: "5652514"
+          - delay: "00:00:03"
+          - action: rest_command.toggle_discharge_to_grid
+            data:
+              battery_id: "5652514"
+              user_id: "4980363"
+              enable: "true"
+  - action: homeassistant.update_entity
+    target:
+      entity_id: sensor.enphase_schedules
