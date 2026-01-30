@@ -247,6 +247,8 @@ sensor:
       - token
       - xsrf
       - exp
+      - battery_id
+      - user_id
 ```
 
 ---
