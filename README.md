@@ -29,7 +29,7 @@ October 2025
 
 ## 🔍 Step 1 – – Automate Enphase JWT Token Retrieval
 
-### 2.1 Create a Shell Script
+### 1.1 Create a Shell Script
 
 Save this script as `/config/get_enphase_token.sh` and make sure you fill in your details at the top of the script:
 
@@ -234,7 +234,7 @@ chmod +x /config/get_enphase_token.sh
 
 ---
 
-### 2.2 Add the Token Sensor to `configuration.yaml`
+### 1.2 Add the Token Sensor to `configuration.yaml`
 
 ```yaml
 sensor:
@@ -251,7 +251,7 @@ sensor:
 
 ---
 
-### 2.3 Access the JWT in Home Assistant
+### 1.3 Access the JWT in Home Assistant
 
 After restarting Home Assistant:
 
@@ -262,7 +262,7 @@ After restarting Home Assistant:
 ---
 
 
-## 🧪 Step 3 – Validation Rest Commands (Required!)
+## 🧪 Step 2 – Validation Rest Commands (Required!)
 
 These commands must run before toggling battery settings or the PUT requests will silently fail.
 
@@ -297,9 +297,9 @@ rest_command:
 
 ---
 
-## 🔁 Step 4 – Rest Commands to Toggle Charging/Discharging
+## 🔁 Step 3 – Rest Commands to Toggle Charging/Discharging
 
-### 4.1 Charge from Grid
+### 3.1 Charge from Grid
 
 ```yaml
   enphase_battery_charge_from_grid:
@@ -320,7 +320,7 @@ rest_command:
       }
 ```
 
-### 4.2 Discharge to Grid
+### 3.2 Discharge to Grid
 
 ```yaml
   enphase_battery_discharge_to_grid:
@@ -342,7 +342,7 @@ rest_command:
       }
 ```
 
-### 4.3 Restrict Battery Discharge
+### 3.3 Restrict Battery Discharge
 
 ```yaml
   enphase_battery_restrict_discharge:
@@ -366,9 +366,9 @@ rest_command:
 
 ---
 
-## ▶️ Step 5 – Scripts to Toggle Charging and Discharging
+## ▶️ Step 4 – Scripts to Toggle Charging and Discharging
 
-### 5.1 Toggle Charge from Grid
+### 4.1 Toggle Charge from Grid
 
 ```yaml
 toggle_enphase_charge_from_grid:
@@ -389,7 +389,7 @@ toggle_enphase_charge_from_grid:
 
 ---
 
-### 5.2 Toggle Discharge to Grid
+### 4.2 Toggle Discharge to Grid
 
 ```yaml
 toggle_enphase_discharge_to_grid:
@@ -407,7 +407,7 @@ toggle_enphase_discharge_to_grid:
         discharge: "{{ discharge }}"
   mode: single
 ```
-### 5.3 Restrict Battery Discharge - On
+### 4.3 Restrict Battery Discharge - On
 
 ```yaml
 action: rest_command.enphase_battery_restrict_discharge
@@ -436,7 +436,7 @@ automation:
 ```
 
 ---
-## ▶️ Step 6 – Scheduling
+## ▶️ Step 5 – Scheduling
 
 ---
 
@@ -544,7 +544,7 @@ icon: mdi:battery-clock
 
 ```
 
-# 7 🗑️ Enphase Battery — Delete Schedules from Home Assistant (REST Method)
+# 6 🗑️ Enphase Battery — Delete Schedules from Home Assistant (REST Method)
 
 This guide lets you **list and delete Enphase schedules** (CFG / DTG / RBD) inside **Home Assistant** using a command_line sensor and a **REST command** that mirrors the browser request.
 
