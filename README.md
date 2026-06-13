@@ -9,6 +9,9 @@ It includes:
 - 🔄 Home Assistant configuration for charge/discharge toggles  
 - 🧪 Required validation before toggling  
 
+## NOTES - June 2026
+1. **401 Unauthorized fix** – Enphase's battery API now requires the host-scoped session cookie `enlighten_manager_token_production` (set at login) on every battery request; the JWT (`e-auth-token`) alone is no longer accepted. The token script now captures this cookie and exposes it as the `mgr_token` attribute, and every `rest_command` sends it in the `Cookie` header. If you were getting 401s, re-copy the updated `get_enphase_token.sh` and the `rest_command` blocks below.
+
 ## NOTES - January 2026
 1. Update script to automatically fetch battery ID and User ID
 
@@ -216,14 +219,18 @@ fi
 jwt="$(<"$JWT_FILE")"
 xsrf="$(get_xsrf)"
 
+# Host-scoped session cookie that the battery API now requires (alongside the JWT).
+# Without this the battery endpoints return 401. Read it straight from the cookie jar.
+mgr_token="$(awk '$6 == "enlighten_manager_token_production" { print $7 }' "$COOKIES" | tail -n1 || true)"
+
 exp="$(jwt_exp "$jwt")"
 
 status="OK"
-if [[ -z "${jwt:-}" || -z "${xsrf:-}" ]]; then
+if [[ -z "${jwt:-}" || -z "${xsrf:-}" || -z "${mgr_token:-}" ]]; then
   status="PARTIAL"
 fi
 
-echo "{\"status\":\"${status}\",\"token\":\"${jwt}\",\"xsrf\":\"${xsrf}\",\"exp\":${exp},\"user_id\":${USER_ID},\"battery_id\":${BATTERY_ID}}"
+echo "{\"status\":\"${status}\",\"token\":\"${jwt}\",\"xsrf\":\"${xsrf}\",\"mgr_token\":\"${mgr_token}\",\"exp\":${exp},\"user_id\":${USER_ID},\"battery_id\":${BATTERY_ID}}"
 ```
 
 Make it executable:
@@ -246,6 +253,7 @@ sensor:
     json_attributes:
       - token
       - xsrf
+      - mgr_token
       - exp
       - battery_id
       - user_id
@@ -280,7 +288,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "enlighten_manager_token_production={{ state_attr('sensor.enphase_jwt', 'mgr_token') }}; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: '{"scheduleType":"dtg"}'
 
   enphase_validate_cfg:
@@ -293,7 +301,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "enlighten_manager_token_production={{ state_attr('sensor.enphase_jwt', 'mgr_token') }}; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: '{"scheduleType":"cfg","forceScheduleOpted":true}'
 ```
 
@@ -314,7 +322,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "enlighten_manager_token_production={{ state_attr('sensor.enphase_jwt', 'mgr_token') }}; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: >
       {
         "chargeFromGrid": {{ charge }},
@@ -335,7 +343,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "enlighten_manager_token_production={{ state_attr('sensor.enphase_jwt', 'mgr_token') }}; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: >
       {
         "dtgControl": {
@@ -357,7 +365,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "enlighten_manager_token_production={{ state_attr('sensor.enphase_jwt', 'mgr_token') }}; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: >
       {
         "rbdControl": {
@@ -460,7 +468,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "enlighten_manager_token_production={{ state_attr('sensor.enphase_jwt', 'mgr_token') }}; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
     payload: >
       {
         "timezone": "Europe/London",
@@ -667,7 +675,7 @@ rest_command:
       Referer: "https://battery-profile-ui.enphaseenergy.com/"
       Username: "{{ user_id }}"
       X-XSRF-Token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
-      Cookie: "locale=en; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }};"
+      Cookie: "locale=en; enlighten_manager_token_production={{ state_attr('sensor.enphase_jwt', 'mgr_token') }}; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }};"
       E-Auth-Token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
       User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"
       Connection: "close"
