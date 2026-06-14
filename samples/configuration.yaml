@@ -34,6 +34,7 @@ command_line:
       command: >
         /bin/bash -c 'ENPHASE_AUTH="{{ state_attr("sensor.enphase_jwt", "token") }}"
         ENPHASE_XSRF="{{ state_attr("sensor.enphase_jwt", "xsrf") }}"
+        ENPHASE_MGR_TOKEN="{{ state_attr("sensor.enphase_jwt", "mgr_token") }}"
         /config/get_enphase_schedules_json.sh'
       scan_interval: 30
       value_template: "Ok"
@@ -44,7 +45,8 @@ command_line:
         - other
       availability: >
         {{ state_attr('sensor.enphase_jwt','token') is not none
-           and state_attr('sensor.enphase_jwt','xsrf') is not none }}
+           and state_attr('sensor.enphase_jwt','xsrf') is not none
+           and state_attr('sensor.enphase_jwt','mgr_token') is not none }}
 
 rest_command:
   toggle_charge_from_grid:

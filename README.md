@@ -569,7 +569,9 @@ This guide lets you **list and delete Enphase schedules** (CFG / DTG / RBD) insi
 ```bash
 #!/usr/bin/env bash
 # Fetch Enphase schedule IDs grouped by type (CFG/DTG/RBD) for Home Assistant.
-# Uses ENPHASE_AUTH (JWT) and ENPHASE_XSRF (xsrf) environment variables.
+# Uses ENPHASE_AUTH (JWT), ENPHASE_XSRF (xsrf) and ENPHASE_MGR_TOKEN (session cookie)
+# environment variables. The enlighten_manager_token_production cookie is now
+# required by the battery API; without it /schedules returns 401.
 
 set -uo pipefail
 
@@ -581,10 +583,10 @@ LOG_FILE="/config/enphase_debug.log"
   echo
   echo "========== $(date '+%F %T') =========="
   echo "Script started"
-  echo "AUTH present: $([ -n "${ENPHASE_AUTH:-}" ] && echo yes || echo no), XSRF: ${ENPHASE_XSRF:-missing}"
+  echo "AUTH present: $([ -n "${ENPHASE_AUTH:-}" ] && echo yes || echo no), XSRF: ${ENPHASE_XSRF:-missing}, MGR: $([ -n "${ENPHASE_MGR_TOKEN:-}" ] && echo present || echo missing)"
 } >> "$LOG_FILE"
 
-if [[ -z "${ENPHASE_AUTH:-}" || -z "${ENPHASE_XSRF:-}" ]]; then
+if [[ -z "${ENPHASE_AUTH:-}" || -z "${ENPHASE_XSRF:-}" || -z "${ENPHASE_MGR_TOKEN:-}" ]]; then
   echo '{"error":"Missing or empty tokens"}'
   echo "Missing or empty tokens" >> "$LOG_FILE"
   exit 0
@@ -599,7 +601,8 @@ JSON=$(curl -sS "${BASE_URL}/schedules" \
   -H "referer: https://battery-profile-ui.enphaseenergy.com/" \
   -H "username: ${USERNAME}" \
   -H "x-xsrf-token: ${ENPHASE_XSRF}" \
-  -H "e-auth-token: ${ENPHASE_AUTH}" 2>>"$LOG_FILE" || echo "")
+  -H "e-auth-token: ${ENPHASE_AUTH}" \
+  -H "cookie: enlighten_manager_token_production=${ENPHASE_MGR_TOKEN}; BP-XSRF-Token=${ENPHASE_XSRF}" 2>>"$LOG_FILE" || echo "")
 
 echo "Raw response length: ${#JSON}" >> "$LOG_FILE"
 
@@ -645,6 +648,7 @@ command_line:
       command: >
         /bin/bash -c 'ENPHASE_AUTH="{{ state_attr("sensor.enphase_jwt", "token") }}"
         ENPHASE_XSRF="{{ state_attr("sensor.enphase_jwt", "xsrf") }}"
+        ENPHASE_MGR_TOKEN="{{ state_attr("sensor.enphase_jwt", "mgr_token") }}"
         /config/get_enphase_schedules_json.sh'
       scan_interval: 30
       value_template: "OK"
