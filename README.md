@@ -568,12 +568,18 @@ This guide lets you **list and delete Enphase schedules** (CFG / DTG / RBD) insi
 
 ```bash
 #!/usr/bin/env bash
-# Fetch Enphase schedule IDs grouped by type (CFG/DTG/RBD) for Home Assistant.
-# Uses ENPHASE_AUTH (JWT), ENPHASE_XSRF (xsrf) and ENPHASE_MGR_TOKEN (session cookie)
-# environment variables. The enlighten_manager_token_production cookie is now
-# required by the battery API; without it /schedules returns 401.
+# get_enphase_schedules_json.sh
+# Fetch Enphase schedule IDs (CFG, DTG, RBD) and output as JSON for Home Assistant.
+#
+# Expects these environment variables (set by the "Enphase Schedules" command_line sensor):
+#   ENPHASE_AUTH       - JWT            ({{ state_attr('sensor.enphase_jwt','token') }})
+#   ENPHASE_XSRF       - XSRF token     ({{ state_attr('sensor.enphase_jwt','xsrf') }})
+#   ENPHASE_MGR_TOKEN  - session cookie ({{ state_attr('sensor.enphase_jwt','mgr_token') }})
+#
+# The enlighten_manager_token_production session cookie is now required by the
+# battery API; without it the /schedules call returns 401.
 
-set -uo pipefail
+set -uo pipefail  # tolerate curl/jq failures but catch unset vars
 
 SITE_ID="YOUR_SITE_ID"
 USERNAME="YOUR_USER_ID"
@@ -583,9 +589,10 @@ LOG_FILE="/config/enphase_debug.log"
   echo
   echo "========== $(date '+%F %T') =========="
   echo "Script started"
-  echo "AUTH present: $([ -n "${ENPHASE_AUTH:-}" ] && echo yes || echo no), XSRF: ${ENPHASE_XSRF:-missing}, MGR: $([ -n "${ENPHASE_MGR_TOKEN:-}" ] && echo present || echo missing)"
+  echo "AUTH length: ${#ENPHASE_AUTH}, XSRF: ${ENPHASE_XSRF:-missing}, MGR: $([ -n "${ENPHASE_MGR_TOKEN:-}" ] && echo present || echo missing)"
 } >> "$LOG_FILE"
 
+# --- Validate tokens ---
 if [[ -z "${ENPHASE_AUTH:-}" || -z "${ENPHASE_XSRF:-}" || -z "${ENPHASE_MGR_TOKEN:-}" ]]; then
   echo '{"error":"Missing or empty tokens"}'
   echo "Missing or empty tokens" >> "$LOG_FILE"
@@ -594,16 +601,19 @@ fi
 
 BASE_URL="https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/${SITE_ID}"
 
-JSON=$(curl -sS "${BASE_URL}/schedules" \
-  -H "accept: application/json, text/plain, */*" \
-  -H "content-type: application/json" \
-  -H "origin: https://battery-profile-ui.enphaseenergy.com" \
-  -H "referer: https://battery-profile-ui.enphaseenergy.com/" \
-  -H "username: ${USERNAME}" \
-  -H "x-xsrf-token: ${ENPHASE_XSRF}" \
-  -H "e-auth-token: ${ENPHASE_AUTH}" \
-  -H "cookie: enlighten_manager_token_production=${ENPHASE_MGR_TOKEN}; BP-XSRF-Token=${ENPHASE_XSRF}" 2>>"$LOG_FILE" || echo "")
+COMMON_HEADERS=(
+  -H "accept: application/json, text/plain, */*"
+  -H "content-type: application/json"
+  -H "origin: https://battery-profile-ui.enphaseenergy.com"
+  -H "referer: https://battery-profile-ui.enphaseenergy.com/"
+  -H "username: ${USERNAME}"
+  -H "x-xsrf-token: ${ENPHASE_XSRF}"
+  -H "e-auth-token: ${ENPHASE_AUTH}"
+  -H "cookie: enlighten_manager_token_production=${ENPHASE_MGR_TOKEN}; BP-XSRF-Token=${ENPHASE_XSRF}"
+)
 
+# --- Fetch data ---
+JSON=$(curl -sS "${BASE_URL}/schedules" "${COMMON_HEADERS[@]}" 2>>"$LOG_FILE" || echo "")
 echo "Raw response length: ${#JSON}" >> "$LOG_FILE"
 
 if [[ -z "$JSON" ]]; then
@@ -612,6 +622,7 @@ if [[ -z "$JSON" ]]; then
   exit 0
 fi
 
+# --- Validate JSON ---
 if ! echo "$JSON" | jq empty >/dev/null 2>&1; then
   SHORT=$(echo "$JSON" | head -c 200 | sed 's/"/\\"/g')
   echo "{\"error\":\"Invalid or non-JSON response\",\"preview\":\"${SHORT}...\"}"
@@ -619,15 +630,49 @@ if ! echo "$JSON" | jq empty >/dev/null 2>&1; then
   exit 0
 fi
 
-OUTPUT=$(echo "$JSON" | jq -c '{
-  cfg: (.cfg.details // [] | map(.scheduleId)),
-  dtg: (.dtg.details // [] | map(.scheduleId)),
-  rbd: (.rbd.details // [] | map(.scheduleId)),
+# --- Extract schedule IDs properly ---
+OUTPUT=$(echo "$JSON" | jq -c '
+{
+  cfg: (
+    (.cfg.details // []) |
+    map({
+      id: .scheduleId,
+      start: .startTime,
+      end: .endTime,
+      limit: .limit,
+      days: .days,
+      enabled: .isEnabled
+    })
+  ),
+  dtg: (
+    (.dtg.details // []) |
+    map({
+      id: .scheduleId,
+      start: .startTime,
+      end: .endTime,
+      limit: .limit,
+      days: .days,
+      enabled: .isEnabled
+    })
+  ),
+  rbd: (
+    (.rbd.details // []) |
+    map({
+      id: .scheduleId,
+      start: .startTime,
+      end: .endTime,
+      limit: .limit,
+      days: .days,
+      enabled: .isEnabled
+    })
+  ),
   other: []
-}')
+}
+')
 
 echo "$OUTPUT"
 echo "Output: $OUTPUT" >> "$LOG_FILE"
+
 exit 0
 ```
 
@@ -659,7 +704,7 @@ command_line:
         - other
 ```
 After reloading, check Developer Tools → States → sensor.enphase_schedules.
-You should see arrays of schedule IDs under cfg, dtg, rbd.
+You should see arrays of schedule objects (id, start, end, limit, days, enabled) under cfg, dtg, rbd.
 
 ⸻
 
