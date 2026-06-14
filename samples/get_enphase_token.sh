@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EMAIL="xxxxxx"     # enlighten email
-PASSWORD="xxxxxxx" # enlighten password
+EMAIL="XXX-XXX
+PASSWORD="XXX-XXX"
 
 # Leave these empty to auto-discover
 BATTERY_ID="${BATTERY_ID:-}"
