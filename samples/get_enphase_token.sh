@@ -181,15 +181,23 @@ fi
 jwt="$(<"$JWT_FILE")"
 xsrf="$(get_xsrf)"
 
-# Host-scoped session cookie that the battery API now requires (alongside the JWT).
-# Without this the battery endpoints return 401. Read it straight from the cookie jar.
-mgr_token="$(awk '$6 == "enlighten_manager_token_production" { print $7 }' "$COOKIES" | tail -n1 || true)"
+# The battery API authenticates off the FULL Enlighten session cookie jar, not just
+# the JWT. Sending only e-auth-token (or a couple of cookies) returns 401. Emit every
+# cookie from the jar (Rails session, enlighten_manager_token_production, BP-XSRF-Token,
+# ...) as one Cookie header string for Home Assistant to replay on each request.
+cookie_header="$(awk -F'\t' '
+  NF>=7 && $5 ~ /^[0-9]+$/ && $1 ~ /enphaseenergy\.com/ {
+    if (out) out = out "; "
+    out = out $6 "=" $7
+  }
+  END { print out }
+' "$COOKIES")"
 
 exp="$(jwt_exp "$jwt")"
 
 status="OK"
-if [[ -z "${jwt:-}" || -z "${xsrf:-}" || -z "${mgr_token:-}" ]]; then
+if [[ -z "${jwt:-}" || -z "${xsrf:-}" || -z "${cookie_header:-}" ]]; then
   status="PARTIAL"
 fi
 
-echo "{\"status\":\"${status}\",\"token\":\"${jwt}\",\"xsrf\":\"${xsrf}\",\"mgr_token\":\"${mgr_token}\",\"exp\":${exp},\"user_id\":${USER_ID},\"battery_id\":${BATTERY_ID}}"
+echo "{\"status\":\"${status}\",\"token\":\"${jwt}\",\"xsrf\":\"${xsrf}\",\"cookie\":\"${cookie_header}\",\"exp\":${exp},\"user_id\":${USER_ID},\"battery_id\":${BATTERY_ID}}"

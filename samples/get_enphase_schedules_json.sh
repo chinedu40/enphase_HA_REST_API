@@ -3,12 +3,12 @@
 # Fetch Enphase schedule IDs (CFG, DTG, RBD) and output as JSON for Home Assistant.
 #
 # Expects these environment variables (set by the "Enphase Schedules" command_line sensor):
-#   ENPHASE_AUTH       - JWT            ({{ state_attr('sensor.enphase_jwt','token') }})
-#   ENPHASE_XSRF       - XSRF token     ({{ state_attr('sensor.enphase_jwt','xsrf') }})
-#   ENPHASE_MGR_TOKEN  - session cookie ({{ state_attr('sensor.enphase_jwt','mgr_token') }})
+#   ENPHASE_AUTH    - JWT             ({{ state_attr('sensor.enphase_jwt','token') }})
+#   ENPHASE_XSRF    - XSRF token      ({{ state_attr('sensor.enphase_jwt','xsrf') }})
+#   ENPHASE_COOKIE  - full cookie jar ({{ state_attr('sensor.enphase_jwt','cookie') }})
 #
-# The enlighten_manager_token_production session cookie is now required by the
-# battery API; without it the /schedules call returns 401.
+# The battery API authenticates off the full Enlighten session cookie jar; without
+# it the /schedules call returns 401.
 
 set -uo pipefail  # tolerate curl/jq failures but catch unset vars
 
@@ -20,11 +20,11 @@ LOG_FILE="/config/enphase_debug.log"
   echo
   echo "========== $(date '+%F %T') =========="
   echo "Script started"
-  echo "AUTH length: ${#ENPHASE_AUTH}, XSRF: ${ENPHASE_XSRF:-missing}, MGR: $([ -n "${ENPHASE_MGR_TOKEN:-}" ] && echo present || echo missing)"
+  echo "AUTH length: ${#ENPHASE_AUTH}, XSRF: ${ENPHASE_XSRF:-missing}, COOKIE: $([ -n "${ENPHASE_COOKIE:-}" ] && echo present || echo missing)"
 } >> "$LOG_FILE"
 
 # --- Validate tokens ---
-if [[ -z "${ENPHASE_AUTH:-}" || -z "${ENPHASE_XSRF:-}" || -z "${ENPHASE_MGR_TOKEN:-}" ]]; then
+if [[ -z "${ENPHASE_AUTH:-}" || -z "${ENPHASE_XSRF:-}" || -z "${ENPHASE_COOKIE:-}" ]]; then
   echo '{"error":"Missing or empty tokens"}'
   echo "Missing or empty tokens" >> "$LOG_FILE"
   exit 0
@@ -40,7 +40,7 @@ COMMON_HEADERS=(
   -H "username: ${USERNAME}"
   -H "x-xsrf-token: ${ENPHASE_XSRF}"
   -H "e-auth-token: ${ENPHASE_AUTH}"
-  -H "cookie: enlighten_manager_token_production=${ENPHASE_MGR_TOKEN}; BP-XSRF-Token=${ENPHASE_XSRF}"
+  -H "cookie: ${ENPHASE_COOKIE}"
 )
 
 # --- Fetch data ---
