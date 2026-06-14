@@ -135,19 +135,25 @@ jwt_valid() {
   [[ "$exp" -gt $((now + 3600)) ]]
 }
 
-get_xsrf() {
+# Probe the battery API and return the HTTP status. Also refreshes BP-XSRF-Token in
+# the cookie jar / response headers. Used both to obtain the XSRF token and to detect
+# an expired session (401/403) so we can re-login.
+battery_isvalid() {
   local jwt
   jwt="$(<"$JWT_FILE")"
 
   curl -sS --compressed -D "$HDRS" -b "$COOKIES" -c "$COOKIES" \
+    -o /dev/null -w '%{http_code}' \
     "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/${BATTERY_ID}/schedules/isValid" \
     -H 'content-type: application/json' \
     -H 'origin: https://battery-profile-ui.enphaseenergy.com' \
     -H 'referer: https://battery-profile-ui.enphaseenergy.com/' \
     -H "e-auth-token: ${jwt}" \
     -H "username: ${USER_ID}" \
-    --data-raw '{"scheduleType":"dtg"}' >/dev/null || true
+    --data-raw '{"scheduleType":"dtg"}' 2>/dev/null || echo "000"
+}
 
+extract_xsrf() {
   local xsrf_token
   xsrf_token="$(awk '$6 == "BP-XSRF-Token" { print $7 }' "$COOKIES" | tail -n1 || true)"
   if [[ -z "${xsrf_token:-}" ]]; then
@@ -179,7 +185,19 @@ fi
 [[ "${USER_ID:-}"   =~ ^[0-9]+$ ]] || { echo "ERROR: USER_ID not set / not numeric" >&2; exit 1; }
 
 jwt="$(<"$JWT_FILE")"
-xsrf="$(get_xsrf)"
+
+# The homeowner JWT can stay valid for days while the Enlighten session cookies expire
+# sooner; when that happens the probe returns 401/403, so force a fresh login to refresh
+# the WHOLE cookie jar (Rails session + manager token + XSRF). Healthy runs add no extra
+# requests - this isValid call is also how we fetch the XSRF token.
+http_code="$(battery_isvalid)"
+if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+  echo "Session probe returned ${http_code}; refreshing session via full login" >&2
+  get_jwt_and_login || true
+  http_code="$(battery_isvalid)"
+fi
+
+xsrf="$(extract_xsrf)"
 
 # The battery API authenticates off the FULL Enlighten session cookie jar, not just
 # the JWT. Sending only e-auth-token (or a couple of cookies) returns 401. Emit every
@@ -196,7 +214,8 @@ cookie_header="$(awk -F'\t' '
 exp="$(jwt_exp "$jwt")"
 
 status="OK"
-if [[ -z "${jwt:-}" || -z "${xsrf:-}" || -z "${cookie_header:-}" ]]; then
+if [[ -z "${jwt:-}" || -z "${xsrf:-}" || -z "${cookie_header:-}" \
+      || ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
   status="PARTIAL"
 fi
 

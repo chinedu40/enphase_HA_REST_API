@@ -22,7 +22,7 @@ command_line:
   - sensor:
       name: "Enphase JWT"
       command: "bash /config/get_enphase_token.sh"
-      scan_interval: 259200 # how often (in seconds) to auto-refresh, e.g. 12 hours
+      scan_interval: 900 # re-run every 15 min; the script probes the session and re-logs in if it has expired
       value_template: "{{ value_json.status }}" # A short status or placeholder
       json_attributes:
         - token
