@@ -136,3 +136,18 @@ rest_command:
       cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: '{"scheduleType":"cfg","forceScheduleOpted":true}'
 
+  enphase_delete_schedule:
+    url: >-
+      https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/{{ battery_id }}/schedules/{{ schedule_id }}/delete
+    method: post
+    headers:
+      accept: "application/json, text/plain, */*"
+      content-type: "application/json"
+      e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      username: "{{ user_id }}"
+      origin: "https://battery-profile-ui.enphaseenergy.com"
+      referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
+    payload: "{}"
+
