@@ -406,6 +406,41 @@ rest_command:
 
 ## ▶️ Step 4 – Scripts to Toggle Charging and Discharging
 
+### 4.0 Refresh-session helper (avoids a one-off 401)
+
+The token sensor self-heals every 15 minutes (Step 1), but a command fired in the gap
+*right after* a session dies could still 401 once. This reusable script forces the
+sensor to re-run (which probes the battery API and re-logs in if needed) and waits for
+a fresh, healthy result. Call `script.enphase_refresh_session` as the first step of any
+battery command to close that gap.
+
+```yaml
+enphase_refresh_session:
+  alias: Enphase – Refresh Session
+  description: >-
+    Force the Enphase token sensor to re-run so it probes the battery API and, if the
+    session has expired, logs in again to mint a fresh cookie jar. Call this before a
+    battery rest_command so a session that died between the sensor's scans can't cause
+    a one-off 401.
+  mode: single
+  sequence:
+    - variables:
+        t0: "{{ now().timestamp() }}"
+    - action: homeassistant.update_entity
+      target:
+        entity_id: sensor.enphase_jwt
+    # The cookie attribute changes every run, so last_updated advances once the refresh
+    # completes. Wait for a NEW, healthy result before returning.
+    - wait_template: >-
+        {{ states.sensor.enphase_jwt.last_updated.timestamp() > t0
+           and states('sensor.enphase_jwt') == 'OK' }}
+      timeout: "00:00:25"
+      continue_on_timeout: true
+```
+
+> Calling `script.enphase_refresh_session` from another script blocks until it finishes,
+> so the command below only runs once a fresh session is confirmed.
+
 ### 4.1 Toggle Charge from Grid
 
 ```yaml
@@ -417,6 +452,7 @@ toggle_enphase_charge_from_grid:
       description: true to enable, false to disable
       example: true
   sequence:
+    - service: script.enphase_refresh_session
     - service: rest_command.enphase_validate_cfg
     - delay: "00:00:01"
     - service: rest_command.enphase_battery_charge_from_grid
@@ -438,6 +474,7 @@ toggle_enphase_discharge_to_grid:
       description: true to enable, false to disable
       example: true
   sequence:
+    - service: script.enphase_refresh_session
     - service: rest_command.enphase_validate_dtg
     - delay: "00:00:01"
     - service: rest_command.enphase_battery_discharge_to_grid
