@@ -13,8 +13,17 @@ COOKIES="$WORKDIR/cookies.txt"
 HDRS="$WORKDIR/headers.txt"
 JWT_FILE="$WORKDIR/jwt.txt"
 
+# Enlighten endpoints / origins (kept in one place so callers stay consistent).
+BASE="https://enlighten.enphaseenergy.com"
+BATTERY_API="$BASE/service/batteryConfig/api/v1"
+ORIGIN="https://battery-profile-ui.enphaseenergy.com"
+REFERER="$ORIGIN/"
+
 # Fail fast instead of letting a stalled request hang past HA's command_timeout.
 CURL_OPTS=(--connect-timeout 8 --max-time 20)
+# Reusable curl prefixes: base flags + the shared cookie jar.
+CURL_BASE=(curl -sS "${CURL_OPTS[@]}" --compressed)
+JAR=(-b "$COOKIES" -c "$COOKIES")
 
 # ------------------ helpers ------------------
 
@@ -52,9 +61,9 @@ discover_ids() {
 
   # Site/battery id from final post-login URL (supports /web/<id>/..., /pv/systems/<id>/..., /systems/<id>/...)
   final_url="$(
-    curl -sS "${CURL_OPTS[@]}" --compressed -L -b "$COOKIES" -c "$COOKIES" \
+    "${CURL_BASE[@]}" -L "${JAR[@]}" \
       -o /dev/null -w "%{url_effective}" \
-      "https://enlighten.enphaseenergy.com/"
+      "$BASE/"
   )"
 
   site_id="$(
@@ -72,8 +81,8 @@ discover_ids() {
 
   # Numeric userId from app-api/<site>/data.json
   user_id="$(
-    curl -sS "${CURL_OPTS[@]}" --compressed -b "$COOKIES" -c "$COOKIES" \
-      "https://enlighten.enphaseenergy.com/app-api/${site_id}/data.json?app=1&device_status=non_retired&is_mobile=0" \
+    "${CURL_BASE[@]}" "${JAR[@]}" \
+      "$BASE/app-api/${site_id}/data.json?app=1&device_status=non_retired&is_mobile=0" \
       | jq -r '.app.userId // .app.user_id // .app.user.id // empty' 2>/dev/null \
       || true
   )"
@@ -99,15 +108,15 @@ get_jwt_and_login() {
   # Fetch authenticity token
   local auth_token
   auth_token="$(
-    curl -sS "${CURL_OPTS[@]}" --compressed -c "$COOKIES" 'https://enlighten.enphaseenergy.com/login' \
+    "${CURL_BASE[@]}" -c "$COOKIES" "$BASE/login" \
       | sed -n 's/.*name="authenticity_token" value="\([^"]*\)".*/\1/p'
   )"
 
   [[ -n "${auth_token:-}" ]] || { echo "ERROR: authenticity_token not found" >&2; return 1; }
 
   # Login (creates session cookies)
-  curl -sS "${CURL_OPTS[@]}" --compressed -b "$COOKIES" -c "$COOKIES" \
-    -X POST 'https://enlighten.enphaseenergy.com/login/login' \
+  "${CURL_BASE[@]}" "${JAR[@]}" \
+    -X POST "$BASE/login/login" \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data "utf8=%E2%9C%93&authenticity_token=${auth_token}&user[email]=${EMAIL}&user[password]=${PASSWORD}" \
     >/dev/null
@@ -115,8 +124,8 @@ get_jwt_and_login() {
   # Get JWT
   local jwt_json jwt_token
   jwt_json="$(
-    curl -sS "${CURL_OPTS[@]}" --compressed -b "$COOKIES" -c "$COOKIES" \
-      'https://enlighten.enphaseenergy.com/app-api/jwt_token.json'
+    "${CURL_BASE[@]}" "${JAR[@]}" \
+      "$BASE/app-api/jwt_token.json"
   )"
   jwt_token="$(printf '%s' "$jwt_json" | jq -r '.token // empty')"
 
@@ -145,12 +154,12 @@ battery_isvalid() {
   local jwt
   jwt="$(<"$JWT_FILE")"
 
-  curl -sS "${CURL_OPTS[@]}" --compressed -D "$HDRS" -b "$COOKIES" -c "$COOKIES" \
+  "${CURL_BASE[@]}" -D "$HDRS" "${JAR[@]}" \
     -o /dev/null -w '%{http_code}' \
-    "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/${BATTERY_ID}/schedules/isValid" \
+    "$BATTERY_API/battery/sites/${BATTERY_ID}/schedules/isValid" \
     -H 'content-type: application/json' \
-    -H 'origin: https://battery-profile-ui.enphaseenergy.com' \
-    -H 'referer: https://battery-profile-ui.enphaseenergy.com/' \
+    -H "origin: $ORIGIN" \
+    -H "referer: $REFERER" \
     -H "e-auth-token: ${jwt}" \
     -H "username: ${USER_ID}" \
     --data-raw '{"scheduleType":"dtg"}' 2>/dev/null || echo "000"
