@@ -44,7 +44,8 @@ COMMON_HEADERS=(
 )
 
 # --- Fetch data ---
-JSON=$(curl -sS "${BASE_URL}/schedules" "${COMMON_HEADERS[@]}" 2>>"$LOG_FILE" || echo "")
+# Fail fast instead of letting a stalled request hang past HA's command_timeout.
+JSON=$(curl -sS --connect-timeout 8 --max-time 20 "${BASE_URL}/schedules" "${COMMON_HEADERS[@]}" 2>>"$LOG_FILE" || echo "")
 echo "Raw response length: ${#JSON}" >> "$LOG_FILE"
 
 if [[ -z "$JSON" ]]; then

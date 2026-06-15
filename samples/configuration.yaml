@@ -22,6 +22,7 @@ command_line:
   - sensor:
       name: "Enphase JWT"
       command: "bash /config/get_enphase_token.sh"
+      command_timeout: 60 # allow time for the full login + session-refresh path
       scan_interval: 900 # re-run every 15 min; the script probes the session and re-logs in if it has expired
       value_template: "{{ value_json.status }}" # A short status or placeholder
       json_attributes:
@@ -36,6 +37,7 @@ command_line:
         ENPHASE_XSRF="{{ state_attr("sensor.enphase_jwt", "xsrf") }}"
         ENPHASE_COOKIE="{{ state_attr("sensor.enphase_jwt", "cookie") }}"
         /config/get_enphase_schedules_json.sh'
+      command_timeout: 60
       scan_interval: 30
       value_template: "Ok"
       json_attributes:

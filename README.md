@@ -12,6 +12,7 @@ It includes:
 ## NOTES - June 2026
 1. **401 Unauthorized fix** – Enphase's battery API now authenticates off the **full Enlighten session cookie jar** (the Rails session cookie, `enlighten_manager_token_production`, `BP-XSRF-Token`, …), not just the `e-auth-token` JWT. Sending only the JWT — or just one or two cookies — returns 401. The token script now emits the entire cookie jar as a single `cookie` attribute, and every `rest_command` replays it in the `Cookie` header. If you were getting 401s, re-copy the updated `get_enphase_token.sh` and the `rest_command` blocks below.
 2. **Automatic session refresh** – the homeowner JWT can stay valid for days while the session cookies expire sooner. On each run `get_enphase_token.sh` now probes the battery API (the `isValid` call it already makes for the XSRF token); if the session has expired (401/403) it automatically does a fresh login to mint a new cookie jar. Set the JWT sensor's `scan_interval` to `900` (15 min) so this self-heal runs often enough to keep the `cookie` attribute live.
+3. **`Timeout for command` fix** – HA's `command_line` integration kills any command running longer than `command_timeout` (default **15 s**). The login/refresh path makes several `curl` calls, so a slow Enphase response could exceed that. Every `curl` now uses `--connect-timeout 8 --max-time 20` (fails fast instead of hanging) and the `command_line` sensors set `command_timeout: 60` for headroom.
 
 ## NOTES - January 2026
 1. Update script to automatically fetch battery ID and User ID
@@ -52,6 +53,9 @@ COOKIES="$WORKDIR/cookies.txt"
 HDRS="$WORKDIR/headers.txt"
 JWT_FILE="$WORKDIR/jwt.txt"
 
+# Fail fast instead of letting a stalled request hang past HA's command_timeout.
+CURL_OPTS=(--connect-timeout 8 --max-time 20)
+
 # ------------------ helpers ------------------
 
 b64url_decode() {
@@ -88,7 +92,7 @@ discover_ids() {
 
   # Site/battery id from final post-login URL (supports /web/<id>/..., /pv/systems/<id>/..., /systems/<id>/...)
   final_url="$(
-    curl -sS --compressed -L -b "$COOKIES" -c "$COOKIES" \
+    curl -sS "${CURL_OPTS[@]}" --compressed -L -b "$COOKIES" -c "$COOKIES" \
       -o /dev/null -w "%{url_effective}" \
       "https://enlighten.enphaseenergy.com/"
   )"
@@ -108,7 +112,7 @@ discover_ids() {
 
   # Numeric userId from app-api/<site>/data.json
   user_id="$(
-    curl -sS --compressed -b "$COOKIES" -c "$COOKIES" \
+    curl -sS "${CURL_OPTS[@]}" --compressed -b "$COOKIES" -c "$COOKIES" \
       "https://enlighten.enphaseenergy.com/app-api/${site_id}/data.json?app=1&device_status=non_retired&is_mobile=0" \
       | jq -r '.app.userId // .app.user_id // .app.user.id // empty' 2>/dev/null \
       || true
@@ -135,14 +139,14 @@ get_jwt_and_login() {
   # Fetch authenticity token
   local auth_token
   auth_token="$(
-    curl -sS --compressed -c "$COOKIES" 'https://enlighten.enphaseenergy.com/login' \
+    curl -sS "${CURL_OPTS[@]}" --compressed -c "$COOKIES" 'https://enlighten.enphaseenergy.com/login' \
       | sed -n 's/.*name="authenticity_token" value="\([^"]*\)".*/\1/p'
   )"
 
   [[ -n "${auth_token:-}" ]] || { echo "ERROR: authenticity_token not found" >&2; return 1; }
 
   # Login (creates session cookies)
-  curl -sS --compressed -b "$COOKIES" -c "$COOKIES" \
+  curl -sS "${CURL_OPTS[@]}" --compressed -b "$COOKIES" -c "$COOKIES" \
     -X POST 'https://enlighten.enphaseenergy.com/login/login' \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data "utf8=%E2%9C%93&authenticity_token=${auth_token}&user[email]=${EMAIL}&user[password]=${PASSWORD}" \
@@ -151,7 +155,7 @@ get_jwt_and_login() {
   # Get JWT
   local jwt_json jwt_token
   jwt_json="$(
-    curl -sS --compressed -b "$COOKIES" -c "$COOKIES" \
+    curl -sS "${CURL_OPTS[@]}" --compressed -b "$COOKIES" -c "$COOKIES" \
       'https://enlighten.enphaseenergy.com/app-api/jwt_token.json'
   )"
   jwt_token="$(printf '%s' "$jwt_json" | jq -r '.token // empty')"
@@ -181,7 +185,7 @@ battery_isvalid() {
   local jwt
   jwt="$(<"$JWT_FILE")"
 
-  curl -sS --compressed -D "$HDRS" -b "$COOKIES" -c "$COOKIES" \
+  curl -sS "${CURL_OPTS[@]}" --compressed -D "$HDRS" -b "$COOKIES" -c "$COOKIES" \
     -o /dev/null -w '%{http_code}' \
     "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/${BATTERY_ID}/schedules/isValid" \
     -H 'content-type: application/json' \
@@ -276,6 +280,7 @@ sensor:
   - platform: command_line
     name: "Enphase JWT"
     command: "bash /config/get_enphase_token.sh"
+    command_timeout: 60  # allow time for the full login + session-refresh path
     scan_interval: 900  # every 15 minutes
     value_template: "{{ value_json.status }}"
     json_attributes:
@@ -678,7 +683,8 @@ COMMON_HEADERS=(
 )
 
 # --- Fetch data ---
-JSON=$(curl -sS "${BASE_URL}/schedules" "${COMMON_HEADERS[@]}" 2>>"$LOG_FILE" || echo "")
+# Fail fast instead of letting a stalled request hang past HA's command_timeout.
+JSON=$(curl -sS --connect-timeout 8 --max-time 20 "${BASE_URL}/schedules" "${COMMON_HEADERS[@]}" 2>>"$LOG_FILE" || echo "")
 echo "Raw response length: ${#JSON}" >> "$LOG_FILE"
 
 if [[ -z "$JSON" ]]; then
@@ -760,6 +766,7 @@ command_line:
         ENPHASE_XSRF="{{ state_attr("sensor.enphase_jwt", "xsrf") }}"
         ENPHASE_COOKIE="{{ state_attr("sensor.enphase_jwt", "cookie") }}"
         /config/get_enphase_schedules_json.sh'
+      command_timeout: 60
       scan_interval: 30
       value_template: "OK"
       json_attributes:
