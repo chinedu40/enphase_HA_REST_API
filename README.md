@@ -9,6 +9,11 @@ It includes:
 - 🔄 Home Assistant configuration for charge/discharge toggles  
 - 🧪 Required validation before toggling  
 
+## NOTES - June 2026
+1. **401 Unauthorized fix** – Enphase's battery API now authenticates off the **full Enlighten session cookie jar** (the Rails session cookie, `enlighten_manager_token_production`, `BP-XSRF-Token`, …), not just the `e-auth-token` JWT. Sending only the JWT — or just one or two cookies — returns 401. The token script now emits the entire cookie jar as a single `cookie` attribute, and every `rest_command` replays it in the `Cookie` header. If you were getting 401s, re-copy the updated `get_enphase_token.sh` and the `rest_command` blocks below.
+2. **Automatic session refresh** – the homeowner JWT can stay valid for days while the session cookies expire sooner. On each run `get_enphase_token.sh` now probes the battery API (the `isValid` call it already makes for the XSRF token); if the session has expired (401/403) it automatically does a fresh login to mint a new cookie jar. Set the JWT sensor's `scan_interval` to `900` (15 min) so this self-heal runs often enough to keep the `cookie` attribute live.
+3. **`Timeout for command` fix** – HA's `command_line` integration kills any command running longer than `command_timeout` (default **15 s**). The login/refresh path makes several `curl` calls, so a slow Enphase response could exceed that. Every `curl` now uses `--connect-timeout 8 --max-time 20` (fails fast instead of hanging) and the `command_line` sensors set `command_timeout: 60` for headroom.
+
 ## NOTES - January 2026
 1. Update script to automatically fetch battery ID and User ID
 
@@ -48,6 +53,9 @@ COOKIES="$WORKDIR/cookies.txt"
 HDRS="$WORKDIR/headers.txt"
 JWT_FILE="$WORKDIR/jwt.txt"
 
+# Fail fast instead of letting a stalled request hang past HA's command_timeout.
+CURL_OPTS=(--connect-timeout 8 --max-time 20)
+
 # ------------------ helpers ------------------
 
 b64url_decode() {
@@ -84,7 +92,7 @@ discover_ids() {
 
   # Site/battery id from final post-login URL (supports /web/<id>/..., /pv/systems/<id>/..., /systems/<id>/...)
   final_url="$(
-    curl -sS --compressed -L -b "$COOKIES" -c "$COOKIES" \
+    curl -sS "${CURL_OPTS[@]}" --compressed -L -b "$COOKIES" -c "$COOKIES" \
       -o /dev/null -w "%{url_effective}" \
       "https://enlighten.enphaseenergy.com/"
   )"
@@ -104,7 +112,7 @@ discover_ids() {
 
   # Numeric userId from app-api/<site>/data.json
   user_id="$(
-    curl -sS --compressed -b "$COOKIES" -c "$COOKIES" \
+    curl -sS "${CURL_OPTS[@]}" --compressed -b "$COOKIES" -c "$COOKIES" \
       "https://enlighten.enphaseenergy.com/app-api/${site_id}/data.json?app=1&device_status=non_retired&is_mobile=0" \
       | jq -r '.app.userId // .app.user_id // .app.user.id // empty' 2>/dev/null \
       || true
@@ -131,14 +139,14 @@ get_jwt_and_login() {
   # Fetch authenticity token
   local auth_token
   auth_token="$(
-    curl -sS --compressed -c "$COOKIES" 'https://enlighten.enphaseenergy.com/login' \
+    curl -sS "${CURL_OPTS[@]}" --compressed -c "$COOKIES" 'https://enlighten.enphaseenergy.com/login' \
       | sed -n 's/.*name="authenticity_token" value="\([^"]*\)".*/\1/p'
   )"
 
   [[ -n "${auth_token:-}" ]] || { echo "ERROR: authenticity_token not found" >&2; return 1; }
 
   # Login (creates session cookies)
-  curl -sS --compressed -b "$COOKIES" -c "$COOKIES" \
+  curl -sS "${CURL_OPTS[@]}" --compressed -b "$COOKIES" -c "$COOKIES" \
     -X POST 'https://enlighten.enphaseenergy.com/login/login' \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data "utf8=%E2%9C%93&authenticity_token=${auth_token}&user[email]=${EMAIL}&user[password]=${PASSWORD}" \
@@ -147,7 +155,7 @@ get_jwt_and_login() {
   # Get JWT
   local jwt_json jwt_token
   jwt_json="$(
-    curl -sS --compressed -b "$COOKIES" -c "$COOKIES" \
+    curl -sS "${CURL_OPTS[@]}" --compressed -b "$COOKIES" -c "$COOKIES" \
       'https://enlighten.enphaseenergy.com/app-api/jwt_token.json'
   )"
   jwt_token="$(printf '%s' "$jwt_json" | jq -r '.token // empty')"
@@ -170,19 +178,25 @@ jwt_valid() {
   [[ "$exp" -gt $((now + 3600)) ]]
 }
 
-get_xsrf() {
+# Probe the battery API and return the HTTP status. Also refreshes BP-XSRF-Token in
+# the cookie jar / response headers. Used both to obtain the XSRF token and to detect
+# an expired session (401/403) so we can re-login.
+battery_isvalid() {
   local jwt
   jwt="$(<"$JWT_FILE")"
 
-  curl -sS --compressed -D "$HDRS" -b "$COOKIES" -c "$COOKIES" \
+  curl -sS "${CURL_OPTS[@]}" --compressed -D "$HDRS" -b "$COOKIES" -c "$COOKIES" \
+    -o /dev/null -w '%{http_code}' \
     "https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/${BATTERY_ID}/schedules/isValid" \
     -H 'content-type: application/json' \
     -H 'origin: https://battery-profile-ui.enphaseenergy.com' \
     -H 'referer: https://battery-profile-ui.enphaseenergy.com/' \
     -H "e-auth-token: ${jwt}" \
     -H "username: ${USER_ID}" \
-    --data-raw '{"scheduleType":"dtg"}' >/dev/null || true
+    --data-raw '{"scheduleType":"dtg"}' 2>/dev/null || echo "000"
+}
 
+extract_xsrf() {
   local xsrf_token
   xsrf_token="$(awk '$6 == "BP-XSRF-Token" { print $7 }' "$COOKIES" | tail -n1 || true)"
   if [[ -z "${xsrf_token:-}" ]]; then
@@ -214,16 +228,41 @@ fi
 [[ "${USER_ID:-}"   =~ ^[0-9]+$ ]] || { echo "ERROR: USER_ID not set / not numeric" >&2; exit 1; }
 
 jwt="$(<"$JWT_FILE")"
-xsrf="$(get_xsrf)"
+
+# The homeowner JWT can stay valid for days while the Enlighten session cookies expire
+# sooner; when that happens the probe returns 401/403, so force a fresh login to refresh
+# the WHOLE cookie jar (Rails session + manager token + XSRF). Healthy runs add no extra
+# requests - this isValid call is also how we fetch the XSRF token.
+http_code="$(battery_isvalid)"
+if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+  echo "Session probe returned ${http_code}; refreshing session via full login" >&2
+  get_jwt_and_login || true
+  http_code="$(battery_isvalid)"
+fi
+
+xsrf="$(extract_xsrf)"
+
+# The battery API authenticates off the FULL Enlighten session cookie jar, not just
+# the JWT. Sending only e-auth-token (or a couple of cookies) returns 401. Emit every
+# cookie from the jar (Rails session, enlighten_manager_token_production, BP-XSRF-Token,
+# ...) as one Cookie header string for Home Assistant to replay on each request.
+cookie_header="$(awk -F'\t' '
+  NF>=7 && $5 ~ /^[0-9]+$/ && $1 ~ /enphaseenergy\.com/ {
+    if (out) out = out "; "
+    out = out $6 "=" $7
+  }
+  END { print out }
+' "$COOKIES")"
 
 exp="$(jwt_exp "$jwt")"
 
 status="OK"
-if [[ -z "${jwt:-}" || -z "${xsrf:-}" ]]; then
+if [[ -z "${jwt:-}" || -z "${xsrf:-}" || -z "${cookie_header:-}" \
+      || ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
   status="PARTIAL"
 fi
 
-echo "{\"status\":\"${status}\",\"token\":\"${jwt}\",\"xsrf\":\"${xsrf}\",\"exp\":${exp},\"user_id\":${USER_ID},\"battery_id\":${BATTERY_ID}}"
+echo "{\"status\":\"${status}\",\"token\":\"${jwt}\",\"xsrf\":\"${xsrf}\",\"cookie\":\"${cookie_header}\",\"exp\":${exp},\"user_id\":${USER_ID},\"battery_id\":${BATTERY_ID}}"
 ```
 
 Make it executable:
@@ -241,11 +280,13 @@ sensor:
   - platform: command_line
     name: "Enphase JWT"
     command: "bash /config/get_enphase_token.sh"
+    command_timeout: 60  # allow time for the full login + session-refresh path
     scan_interval: 900  # every 15 minutes
     value_template: "{{ value_json.status }}"
     json_attributes:
       - token
       - xsrf
+      - cookie
       - exp
       - battery_id
       - user_id
@@ -280,7 +321,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: '{"scheduleType":"dtg"}'
 
   enphase_validate_cfg:
@@ -293,7 +334,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: '{"scheduleType":"cfg","forceScheduleOpted":true}'
 ```
 
@@ -314,7 +355,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: >
       {
         "chargeFromGrid": {{ charge }},
@@ -335,7 +376,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: >
       {
         "dtgControl": {
@@ -357,7 +398,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: >
       {
         "rbdControl": {
@@ -370,6 +411,41 @@ rest_command:
 
 ## ▶️ Step 4 – Scripts to Toggle Charging and Discharging
 
+### 4.0 Refresh-session helper (avoids a one-off 401)
+
+The token sensor self-heals every 15 minutes (Step 1), but a command fired in the gap
+*right after* a session dies could still 401 once. This reusable script forces the
+sensor to re-run (which probes the battery API and re-logs in if needed) and waits for
+a fresh, healthy result. Call `script.enphase_refresh_session` as the first step of any
+battery command to close that gap.
+
+```yaml
+enphase_refresh_session:
+  alias: Enphase – Refresh Session
+  description: >-
+    Force the Enphase token sensor to re-run so it probes the battery API and, if the
+    session has expired, logs in again to mint a fresh cookie jar. Call this before a
+    battery rest_command so a session that died between the sensor's scans can't cause
+    a one-off 401.
+  mode: single
+  sequence:
+    - variables:
+        t0: "{{ now().timestamp() }}"
+    - action: homeassistant.update_entity
+      target:
+        entity_id: sensor.enphase_jwt
+    # The cookie attribute changes every run, so last_updated advances once the refresh
+    # completes. Wait for a NEW, healthy result before returning.
+    - wait_template: >-
+        {{ states.sensor.enphase_jwt.last_updated.timestamp() > t0
+           and states('sensor.enphase_jwt') == 'OK' }}
+      timeout: "00:00:25"
+      continue_on_timeout: true
+```
+
+> Calling `script.enphase_refresh_session` from another script blocks until it finishes,
+> so the command below only runs once a fresh session is confirmed.
+
 ### 4.1 Toggle Charge from Grid
 
 ```yaml
@@ -381,6 +457,7 @@ toggle_enphase_charge_from_grid:
       description: true to enable, false to disable
       example: true
   sequence:
+    - service: script.enphase_refresh_session
     - service: rest_command.enphase_validate_cfg
     - delay: "00:00:01"
     - service: rest_command.enphase_battery_charge_from_grid
@@ -402,6 +479,7 @@ toggle_enphase_discharge_to_grid:
       description: true to enable, false to disable
       example: true
   sequence:
+    - service: script.enphase_refresh_session
     - service: rest_command.enphase_validate_dtg
     - delay: "00:00:01"
     - service: rest_command.enphase_battery_discharge_to_grid
@@ -460,7 +538,7 @@ rest_command:
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
-      cookie: "BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: >
       {
         "timezone": "Europe/London",
@@ -560,10 +638,18 @@ This guide lets you **list and delete Enphase schedules** (CFG / DTG / RBD) insi
 
 ```bash
 #!/usr/bin/env bash
-# Fetch Enphase schedule IDs grouped by type (CFG/DTG/RBD) for Home Assistant.
-# Uses ENPHASE_AUTH (JWT) and ENPHASE_XSRF (xsrf) environment variables.
+# get_enphase_schedules_json.sh
+# Fetch Enphase schedule IDs (CFG, DTG, RBD) and output as JSON for Home Assistant.
+#
+# Expects these environment variables (set by the "Enphase Schedules" command_line sensor):
+#   ENPHASE_AUTH    - JWT             ({{ state_attr('sensor.enphase_jwt','token') }})
+#   ENPHASE_XSRF    - XSRF token      ({{ state_attr('sensor.enphase_jwt','xsrf') }})
+#   ENPHASE_COOKIE  - full cookie jar ({{ state_attr('sensor.enphase_jwt','cookie') }})
+#
+# The battery API authenticates off the full Enlighten session cookie jar; without
+# it the /schedules call returns 401.
 
-set -uo pipefail
+set -uo pipefail  # tolerate curl/jq failures but catch unset vars
 
 SITE_ID="YOUR_SITE_ID"
 USERNAME="YOUR_USER_ID"
@@ -573,10 +659,11 @@ LOG_FILE="/config/enphase_debug.log"
   echo
   echo "========== $(date '+%F %T') =========="
   echo "Script started"
-  echo "AUTH present: $([ -n "${ENPHASE_AUTH:-}" ] && echo yes || echo no), XSRF: ${ENPHASE_XSRF:-missing}"
+  echo "AUTH length: ${#ENPHASE_AUTH}, XSRF: ${ENPHASE_XSRF:-missing}, COOKIE: $([ -n "${ENPHASE_COOKIE:-}" ] && echo present || echo missing)"
 } >> "$LOG_FILE"
 
-if [[ -z "${ENPHASE_AUTH:-}" || -z "${ENPHASE_XSRF:-}" ]]; then
+# --- Validate tokens ---
+if [[ -z "${ENPHASE_AUTH:-}" || -z "${ENPHASE_XSRF:-}" || -z "${ENPHASE_COOKIE:-}" ]]; then
   echo '{"error":"Missing or empty tokens"}'
   echo "Missing or empty tokens" >> "$LOG_FILE"
   exit 0
@@ -584,15 +671,20 @@ fi
 
 BASE_URL="https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/${SITE_ID}"
 
-JSON=$(curl -sS "${BASE_URL}/schedules" \
-  -H "accept: application/json, text/plain, */*" \
-  -H "content-type: application/json" \
-  -H "origin: https://battery-profile-ui.enphaseenergy.com" \
-  -H "referer: https://battery-profile-ui.enphaseenergy.com/" \
-  -H "username: ${USERNAME}" \
-  -H "x-xsrf-token: ${ENPHASE_XSRF}" \
-  -H "e-auth-token: ${ENPHASE_AUTH}" 2>>"$LOG_FILE" || echo "")
+COMMON_HEADERS=(
+  -H "accept: application/json, text/plain, */*"
+  -H "content-type: application/json"
+  -H "origin: https://battery-profile-ui.enphaseenergy.com"
+  -H "referer: https://battery-profile-ui.enphaseenergy.com/"
+  -H "username: ${USERNAME}"
+  -H "x-xsrf-token: ${ENPHASE_XSRF}"
+  -H "e-auth-token: ${ENPHASE_AUTH}"
+  -H "cookie: ${ENPHASE_COOKIE}"
+)
 
+# --- Fetch data ---
+# Fail fast instead of letting a stalled request hang past HA's command_timeout.
+JSON=$(curl -sS --connect-timeout 8 --max-time 20 "${BASE_URL}/schedules" "${COMMON_HEADERS[@]}" 2>>"$LOG_FILE" || echo "")
 echo "Raw response length: ${#JSON}" >> "$LOG_FILE"
 
 if [[ -z "$JSON" ]]; then
@@ -601,6 +693,7 @@ if [[ -z "$JSON" ]]; then
   exit 0
 fi
 
+# --- Validate JSON ---
 if ! echo "$JSON" | jq empty >/dev/null 2>&1; then
   SHORT=$(echo "$JSON" | head -c 200 | sed 's/"/\\"/g')
   echo "{\"error\":\"Invalid or non-JSON response\",\"preview\":\"${SHORT}...\"}"
@@ -608,15 +701,49 @@ if ! echo "$JSON" | jq empty >/dev/null 2>&1; then
   exit 0
 fi
 
-OUTPUT=$(echo "$JSON" | jq -c '{
-  cfg: (.cfg.details // [] | map(.scheduleId)),
-  dtg: (.dtg.details // [] | map(.scheduleId)),
-  rbd: (.rbd.details // [] | map(.scheduleId)),
+# --- Extract schedule IDs properly ---
+OUTPUT=$(echo "$JSON" | jq -c '
+{
+  cfg: (
+    (.cfg.details // []) |
+    map({
+      id: .scheduleId,
+      start: .startTime,
+      end: .endTime,
+      limit: .limit,
+      days: .days,
+      enabled: .isEnabled
+    })
+  ),
+  dtg: (
+    (.dtg.details // []) |
+    map({
+      id: .scheduleId,
+      start: .startTime,
+      end: .endTime,
+      limit: .limit,
+      days: .days,
+      enabled: .isEnabled
+    })
+  ),
+  rbd: (
+    (.rbd.details // []) |
+    map({
+      id: .scheduleId,
+      start: .startTime,
+      end: .endTime,
+      limit: .limit,
+      days: .days,
+      enabled: .isEnabled
+    })
+  ),
   other: []
-}')
+}
+')
 
 echo "$OUTPUT"
 echo "Output: $OUTPUT" >> "$LOG_FILE"
+
 exit 0
 ```
 
@@ -637,7 +764,9 @@ command_line:
       command: >
         /bin/bash -c 'ENPHASE_AUTH="{{ state_attr("sensor.enphase_jwt", "token") }}"
         ENPHASE_XSRF="{{ state_attr("sensor.enphase_jwt", "xsrf") }}"
+        ENPHASE_COOKIE="{{ state_attr("sensor.enphase_jwt", "cookie") }}"
         /config/get_enphase_schedules_json.sh'
+      command_timeout: 60
       scan_interval: 30
       value_template: "OK"
       json_attributes:
@@ -647,7 +776,7 @@ command_line:
         - other
 ```
 After reloading, check Developer Tools → States → sensor.enphase_schedules.
-You should see arrays of schedule IDs under cfg, dtg, rbd.
+You should see arrays of schedule objects (id, start, end, limit, days, enabled) under cfg, dtg, rbd.
 
 ⸻
 
@@ -667,7 +796,7 @@ rest_command:
       Referer: "https://battery-profile-ui.enphaseenergy.com/"
       Username: "{{ user_id }}"
       X-XSRF-Token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
-      Cookie: "locale=en; BP-XSRF-Token={{ state_attr('sensor.enphase_jwt', 'xsrf') }};"
+      Cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
       E-Auth-Token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
       User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"
       Connection: "close"

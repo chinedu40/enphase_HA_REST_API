@@ -25,6 +25,7 @@ fields:
       state:
         entity_id: input_select.enphase_schedule_picker
 sequence:
+  - action: script.enphase_refresh_session
   - variables:
       st: "{{ schedule_type }}"
       exclude_raw: "{{ exclude_schedule | default('none') }}"
@@ -50,6 +51,8 @@ sequence:
         sequence:
           - action: rest_command.enphase_delete_schedule
             data:
+              battery_id: "YOUR_BATTERY_ID"
+              user_id: "YOUR_USER_ID"
               schedule_id: "{{ only_id }}"
           - variables:
               deleted_type: >
@@ -102,6 +105,8 @@ sequence:
                   then:
                     - action: rest_command.enphase_delete_schedule
                       data:
+                        battery_id: "YOUR_BATTERY_ID"
+                        user_id: "YOUR_USER_ID"
                         schedule_id: "{{ repeat.item.id }}"
                     - variables:
                         cfg_deleted: true
@@ -119,6 +124,8 @@ sequence:
                   then:
                     - action: rest_command.enphase_delete_schedule
                       data:
+                        battery_id: "YOUR_BATTERY_ID"
+                        user_id: "YOUR_USER_ID"
                         schedule_id: "{{ repeat.item.id }}"
                     - variables:
                         dtg_deleted: true
@@ -136,6 +143,8 @@ sequence:
                   then:
                     - action: rest_command.enphase_delete_schedule
                       data:
+                        battery_id: "YOUR_BATTERY_ID"
+                        user_id: "YOUR_USER_ID"
                         schedule_id: "{{ repeat.item.id }}"
                     - variables:
                         rbd_deleted: true

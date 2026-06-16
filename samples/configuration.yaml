@@ -22,17 +22,22 @@ command_line:
   - sensor:
       name: "Enphase JWT"
       command: "bash /config/get_enphase_token.sh"
-      scan_interval: 259200 # how often (in seconds) to auto-refresh, e.g. 12 hours
+      command_timeout: 60 # allow time for the full login + session-refresh path
+      scan_interval: 900 # re-run every 15 min; the script probes the session and re-logs in if it has expired
       value_template: "{{ value_json.status }}" # A short status or placeholder
       json_attributes:
         - token
+        - xsrf
+        - cookie
 
   - sensor:
       name: Enphase Schedules
       command: >
         /bin/bash -c 'ENPHASE_AUTH="{{ state_attr("sensor.enphase_jwt", "token") }}"
         ENPHASE_XSRF="{{ state_attr("sensor.enphase_jwt", "xsrf") }}"
+        ENPHASE_COOKIE="{{ state_attr("sensor.enphase_jwt", "cookie") }}"
         /config/get_enphase_schedules_json.sh'
+      command_timeout: 60
       scan_interval: 30
       value_template: "Ok"
       json_attributes:
@@ -42,7 +47,8 @@ command_line:
         - other
       availability: >
         {{ state_attr('sensor.enphase_jwt','token') is not none
-           and state_attr('sensor.enphase_jwt','xsrf') is not none }}
+           and state_attr('sensor.enphase_jwt','xsrf') is not none
+           and state_attr('sensor.enphase_jwt','cookie') is not none }}
 
 rest_command:
   toggle_charge_from_grid:
@@ -51,7 +57,11 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
+      origin: "https://battery-profile-ui.enphaseenergy.com"
+      referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: >
       {
         "chargeFromGrid": {{ charge_value }},
@@ -64,7 +74,11 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
+      origin: "https://battery-profile-ui.enphaseenergy.com"
+      referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: >
       {
         "dtgControl": {
@@ -83,9 +97,11 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: >
       {
         "timezone": "Europe/London",
@@ -102,9 +118,11 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: '{"scheduleType":"dtg"}'
 
   enphase_validate_schedule_charge:
@@ -113,8 +131,25 @@ rest_command:
     headers:
       content-type: "application/json"
       e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
       username: "{{ user_id }}"
       origin: "https://battery-profile-ui.enphaseenergy.com"
       referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
     payload: '{"scheduleType":"cfg","forceScheduleOpted":true}'
+
+  enphase_delete_schedule:
+    url: >-
+      https://enlighten.enphaseenergy.com/service/batteryConfig/api/v1/battery/sites/{{ battery_id }}/schedules/{{ schedule_id }}/delete
+    method: post
+    headers:
+      accept: "application/json, text/plain, */*"
+      content-type: "application/json"
+      e-auth-token: "{{ state_attr('sensor.enphase_jwt', 'token') }}"
+      x-xsrf-token: "{{ state_attr('sensor.enphase_jwt', 'xsrf') }}"
+      username: "{{ user_id }}"
+      origin: "https://battery-profile-ui.enphaseenergy.com"
+      referer: "https://battery-profile-ui.enphaseenergy.com/"
+      cookie: "{{ state_attr('sensor.enphase_jwt', 'cookie') }}"
+    payload: "{}"
 

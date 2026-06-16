@@ -1,4 +1,5 @@
 sequence:
+  - action: script.enphase_refresh_session
   - variables:
       st_in: "{{ (start_time | default('', true) | string).strip() }}"
       st: >

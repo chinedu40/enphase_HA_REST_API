@@ -1,0 +1,20 @@
+alias: Enphase – Refresh Session
+description: >-
+  Force the Enphase token sensor to re-run so it probes the battery API and, if the
+  session has expired, logs in again to mint a fresh cookie jar. Call this (as
+  script.enphase_refresh_session) as the first step of a battery command so a session
+  that died between the sensor's scans can't cause a one-off 401.
+mode: single
+sequence:
+  - variables:
+      t0: "{{ now().timestamp() }}"
+  - action: homeassistant.update_entity
+    target:
+      entity_id: sensor.enphase_jwt
+  # The cookie attribute changes every run, so last_updated advances once the refresh
+  # completes. Wait for a NEW, healthy result before returning.
+  - wait_template: >-
+      {{ states.sensor.enphase_jwt.last_updated.timestamp() > t0
+         and states('sensor.enphase_jwt') == 'OK' }}
+    timeout: "00:00:25"
+    continue_on_timeout: true
